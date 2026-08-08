@@ -89,6 +89,82 @@
     }
     .tabbar button .icon { font-size: 20px; }
     .tabbar button.active { color: var(--tg-theme-button-color, #2481cc); }
+
+    .event-form {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .event-form-row { display: flex; align-items: center; gap: 8px; }
+    .event-form-row label {
+      width: 52px;
+      flex-shrink: 0;
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+    }
+    .event-form-row input { flex: 1; min-width: 0; }
+    input[type="time"] { padding: 12px; font-size: 16px; border-radius: 10px;
+      border: 1px solid var(--tg-theme-hint-color, #cccccc);
+      background: var(--tg-theme-bg-color, #ffffff);
+      color: var(--tg-theme-text-color, #111111); }
+
+    .cal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 4px 0 10px;
+    }
+    .cal-header .cal-title { font-weight: 600; font-size: 16px; text-transform: capitalize; }
+    .cal-header button {
+      background: none;
+      border: none;
+      font-size: 22px;
+      line-height: 1;
+      padding: 4px 14px;
+      color: var(--tg-theme-button-color, #2481cc);
+    }
+    .cal-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 12px;
+      color: var(--tg-theme-hint-color, #999999);
+      margin-bottom: 6px;
+    }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-bottom: 20px; }
+    .cal-day {
+      aspect-ratio: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      font-size: 14px;
+      position: relative;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      border: none;
+      color: var(--tg-theme-text-color, #111111);
+    }
+    .cal-day.other-month { opacity: 0.35; }
+    .cal-day.today { box-shadow: inset 0 0 0 2px var(--tg-theme-button-color, #2481cc); }
+    .cal-day.selected {
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+    .cal-day .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--tg-theme-button-color, #2481cc);
+      position: absolute;
+      bottom: 6px;
+    }
+    .cal-day.selected .dot { background: var(--tg-theme-button-text-color, #ffffff); }
+    #agenda-title { font-size: 14px; color: var(--tg-theme-hint-color, #999999); margin: 0 0 8px; }
   </style>
 </head>
 <body>
@@ -111,11 +187,32 @@
     </section>
 
     <section id="page-calendar" class="page">
-      <div class="quick-add">
-        <input id="event-text" type="text" placeholder="Событие">
-        <input id="event-date" type="date">
-        <input id="event-time" type="time">
+      <div class="event-form">
+        <input id="event-title" type="text" placeholder="Название события">
+        <div class="event-form-row">
+          <label>Начало</label>
+          <input id="event-start-date" type="date">
+          <input id="event-start-time" type="time">
+        </div>
+        <div class="event-form-row">
+          <label>Конец</label>
+          <input id="event-end-date" type="date">
+          <input id="event-end-time" type="time">
+        </div>
+        <input id="event-place" type="text" placeholder="Место (необязательно)">
       </div>
+
+      <div class="cal-header">
+        <button id="cal-prev" type="button">‹</button>
+        <span class="cal-title" id="cal-title"></span>
+        <button id="cal-next" type="button">›</button>
+      </div>
+      <div class="cal-weekdays">
+        <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+
+      <div id="agenda-title"></div>
       <ul id="events-list" class="list"></ul>
     </section>
   </div>
@@ -163,9 +260,17 @@
     const taskDueInput = document.getElementById("task-due");
     const shoppingTextInput = document.getElementById("shopping-text");
     const eventsList = document.getElementById("events-list");
-    const eventTextInput = document.getElementById("event-text");
-    const eventDateInput = document.getElementById("event-date");
-    const eventTimeInput = document.getElementById("event-time");
+    const eventTitleInput = document.getElementById("event-title");
+    const eventStartDateInput = document.getElementById("event-start-date");
+    const eventStartTimeInput = document.getElementById("event-start-time");
+    const eventEndDateInput = document.getElementById("event-end-date");
+    const eventEndTimeInput = document.getElementById("event-end-time");
+    const eventPlaceInput = document.getElementById("event-place");
+    const calTitleEl = document.getElementById("cal-title");
+    const calGridEl = document.getElementById("cal-grid");
+    const agendaTitleEl = document.getElementById("agenda-title");
+    const calPrevBtn = document.getElementById("cal-prev");
+    const calNextBtn = document.getElementById("cal-next");
 
     const tg = window.Telegram.WebApp;
     tg.ready();
@@ -341,6 +446,10 @@
     }
 
     // ---- Календарь ----
+    const MONTH_NAMES = [
+      "январь", "февраль", "март", "апрель", "май", "июнь",
+      "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь",
+    ];
     function localDateStr(date) {
       const y = date.getFullYear();
       const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -348,23 +457,98 @@
       return `${y}-${m}-${d}`;
     }
 
-    function renderEvents(snapshot) {
+    let allEvents = []; // все события из Firestore, живут в памяти для отрисовки сетки+повестки
+    let calendarViewDate = new Date(); // первое число месяца, который сейчас показан в сетке
+    calendarViewDate.setDate(1);
+    let selectedDate = new Date(); // выбранный день (для повестки снизу)
+
+    function eventsOnDate(dateObj) {
+      const key = localDateStr(dateObj);
+      return allEvents
+        .filter((ev) => key >= ev.startDate && key <= (ev.endDate || ev.startDate))
+        .sort((a, b) => (a.startTime || "").localeCompare(b.startTime || ""));
+    }
+
+    function renderCalendarGrid() {
+      calTitleEl.textContent =
+        MONTH_NAMES[calendarViewDate.getMonth()] + " " + calendarViewDate.getFullYear();
+
+      const firstOfMonth = new Date(calendarViewDate);
+      const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0=Пн
+      const gridStart = new Date(firstOfMonth);
+      gridStart.setDate(gridStart.getDate() - firstWeekday);
+
+      const todayKey = localDateStr(new Date());
+      const selectedKey = localDateStr(selectedDate);
+
+      calGridEl.innerHTML = "";
+      for (let i = 0; i < 42; i++) {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + i);
+        const cellKey = localDateStr(cellDate);
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cal-day";
+        if (cellDate.getMonth() !== calendarViewDate.getMonth()) btn.classList.add("other-month");
+        if (cellKey === todayKey) btn.classList.add("today");
+        if (cellKey === selectedKey) btn.classList.add("selected");
+
+        const num = document.createElement("span");
+        num.textContent = cellDate.getDate();
+        btn.appendChild(num);
+
+        if (eventsOnDate(cellDate).length > 0) {
+          const dot = document.createElement("span");
+          dot.className = "dot";
+          btn.appendChild(dot);
+        }
+
+        btn.addEventListener("click", () => {
+          selectedDate = cellDate;
+          renderCalendarGrid();
+          renderAgenda();
+        });
+
+        calGridEl.appendChild(btn);
+      }
+    }
+
+    function renderAgenda() {
+      const todayKey = localDateStr(new Date());
+      const tomorrowKey = localDateStr(new Date(Date.now() + 86400000));
+      const selectedKey = localDateStr(selectedDate);
+
+      if (selectedKey === todayKey) agendaTitleEl.textContent = "Сегодня";
+      else if (selectedKey === tomorrowKey) agendaTitleEl.textContent = "Завтра";
+      else {
+        agendaTitleEl.textContent = selectedDate.toLocaleDateString("ru-RU", {
+          day: "numeric", month: "long", weekday: "long",
+        });
+      }
+
+      const dayEvents = eventsOnDate(selectedDate);
       eventsList.innerHTML = "";
-      if (snapshot.empty) {
-        eventsList.innerHTML = '<li class="empty" style="background:none;">Ближайших событий нет</li>';
+      if (dayEvents.length === 0) {
+        eventsList.innerHTML = '<li class="empty" style="background:none;">Событий нет</li>';
         return;
       }
-      snapshot.forEach((docSnap) => {
-        const eventItem = docSnap.data();
+
+      dayEvents.forEach((ev) => {
         const li = document.createElement("li");
 
         const text = document.createElement("span");
         text.className = "text";
-        text.textContent = eventItem.text;
+        text.textContent = ev.title;
 
         const when = document.createElement("span");
         when.className = "due";
-        when.textContent = eventItem.date + (eventItem.time ? " " + eventItem.time : "");
+        const multiDay = ev.endDate && ev.endDate !== ev.startDate;
+        let whenText = ev.startTime ? ev.startTime : "весь день";
+        if (ev.endTime && !multiDay) whenText += "–" + ev.endTime;
+        if (multiDay) whenText += " → " + ev.endDate;
+        if (ev.place) whenText += " · " + ev.place;
+        when.textContent = whenText;
 
         li.appendChild(text);
         li.appendChild(when);
@@ -373,35 +557,57 @@
     }
 
     function startEventsListener() {
-      const eventsQuery = query(
-        collection(db, "events"),
-        where("date", ">=", localDateStr(new Date())),
-        orderBy("date", "asc")
-      );
-      onSnapshot(eventsQuery, renderEvents, (err) => {
+      const eventsQuery = query(collection(db, "events"), orderBy("startAt", "asc"));
+      onSnapshot(eventsQuery, (snapshot) => {
+        allEvents = snapshot.docs.map((d) => d.data());
+        renderCalendarGrid();
+        renderAgenda();
+      }, (err) => {
         statusEl.textContent = "Ошибка загрузки календаря: " + err.message;
       });
     }
 
+    calPrevBtn.addEventListener("click", () => {
+      calendarViewDate.setMonth(calendarViewDate.getMonth() - 1);
+      renderCalendarGrid();
+    });
+    calNextBtn.addEventListener("click", () => {
+      calendarViewDate.setMonth(calendarViewDate.getMonth() + 1);
+      renderCalendarGrid();
+    });
+
     async function addEvent() {
-      const text = eventTextInput.value.trim();
-      if (!text || !eventDateInput.value) {
+      const title = eventTitleInput.value.trim();
+      const startDate = eventStartDateInput.value;
+      if (!title || !startDate) {
         haptic("error");
-        (text ? eventDateInput : eventTextInput).focus();
+        (title ? eventStartDateInput : eventTitleInput).focus();
         return;
       }
 
+      const startTime = eventStartTimeInput.value || null;
+      const endDate = eventEndDateInput.value || startDate;
+      const endTime = eventEndTimeInput.value || null;
+      const startAt = new Date(`${startDate}T${startTime || "00:00"}:00`);
+
       await addDoc(collection(db, "events"), {
-        text,
-        date: eventDateInput.value,
-        time: eventTimeInput.value || null,
+        title,
+        startDate,
+        startTime,
+        endDate,
+        endTime,
+        place: eventPlaceInput.value.trim() || null,
+        startAt,
         authorUid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
       });
 
-      eventTextInput.value = "";
-      eventDateInput.value = "";
-      eventTimeInput.value = "";
+      eventTitleInput.value = "";
+      eventStartDateInput.value = "";
+      eventStartTimeInput.value = "";
+      eventEndDateInput.value = "";
+      eventEndTimeInput.value = "";
+      eventPlaceInput.value = "";
       haptic("success");
     }
 

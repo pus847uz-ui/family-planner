@@ -143,3 +143,49 @@ exports.sendTaskReminders = onSchedule(
   }
 );
 
+const EVENT_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
+const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+exports.sendEventReminders = onSchedule(
+  { schedule: "every 30 minutes", secrets: [BOT_TOKEN] },
+  async () => {
+    const db = getFirestore();
+    const now = Date.now();
+
+    const [eventsSnap, usersSnap] = await Promise.all([
+      db.collection("events").get(),
+      db.collection("users").get(),
+    ]);
+    const chatIds = usersSnap.docs.map((d) => d.id);
+
+    for (const eventDoc of eventsSnap.docs) {
+      const eventItem = eventDoc.data();
+      if (!eventItem.startAt) continue;
+
+      const diffMs = eventItem.startAt.toMillis() - now;
+      const updates = {};
+      let messageText = null;
+
+      const in2Hours = diffMs <= TWO_HOURS_MS && diffMs > TWO_HOURS_MS - EVENT_REMINDER_INTERVAL_MS;
+      const in1Day = diffMs <= ONE_DAY_MS && diffMs > ONE_DAY_MS - EVENT_REMINDER_INTERVAL_MS;
+
+      if (in1Day && !eventItem.reminded1Day) {
+        messageText = `Напоминание: завтра "${eventItem.title}"` +
+          (eventItem.startTime ? ` в ${eventItem.startTime}` : "");
+        updates.reminded1Day = true;
+      } else if (in2Hours && !eventItem.reminded2Hours) {
+        messageText = `Напоминание: через 2 часа "${eventItem.title}"` +
+          (eventItem.startTime ? ` в ${eventItem.startTime}` : "");
+        updates.reminded2Hours = true;
+      }
+
+      if (messageText) {
+        await Promise.all(
+          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
+        );
+        await eventDoc.ref.update(updates);
+      }
+    }
+  }
+);
