@@ -6,39 +6,116 @@
   <title>Family Planner</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    body { font-family: sans-serif; padding: 12px; }
-    #tasks-section, #shopping-section { display: none; margin-top: 20px; }
-    #task-form, #shopping-form { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
-    #task-text, #shopping-text { flex: 1; min-width: 150px; padding: 6px; }
-    #task-due { padding: 6px; }
-    button { padding: 6px 12px; }
-    ul { list-style: none; padding: 0; }
-    li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #ddd; }
-    li .due { color: #888; font-size: 0.9em; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 12px 12px 84px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--tg-theme-bg-color, #ffffff);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    #status {
+      padding: 16px;
+      font-size: 15px;
+      color: var(--tg-theme-hint-color, #888888);
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+    .quick-add { display: flex; gap: 8px; margin: 8px 0 16px; }
+    .quick-add input[type="text"] {
+      flex: 1;
+      min-width: 0;
+    }
+    input[type="text"], input[type="date"] {
+      padding: 12px;
+      font-size: 16px;
+      border-radius: 10px;
+      border: 1px solid var(--tg-theme-hint-color, #cccccc);
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    .list { list-style: none; margin: 0; padding: 0; }
+    .list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 48px;
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .list li input[type="checkbox"] {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+    }
+    .list li .text { flex: 1; font-size: 16px; }
+    .list li .due {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      white-space: nowrap;
+    }
+    .empty {
+      text-align: center;
+      padding: 32px 0;
+      color: var(--tg-theme-hint-color, #999999);
+      font-size: 15px;
+    }
+    .tabbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      border-top: 1px solid rgba(127, 127, 127, 0.25);
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .tabbar button {
+      flex: 1;
+      border: none;
+      background: none;
+      padding: 10px 0 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      font-size: 11px;
+      color: var(--tg-theme-hint-color, #999999);
+    }
+    .tabbar button .icon { font-size: 20px; }
+    .tabbar button.active { color: var(--tg-theme-button-color, #2481cc); }
   </style>
 </head>
 <body>
-  <h1>Family Planner</h1>
   <div id="status">Проверяем доступ...</div>
 
-  <section id="tasks-section">
-    <h2>Задачи</h2>
-    <form id="task-form">
-      <input id="task-text" type="text" placeholder="Что нужно сделать?" required>
-      <input id="task-due" type="date">
-      <button type="submit">Добавить</button>
-    </form>
-    <ul id="tasks-list"></ul>
-  </section>
+  <div id="app" style="display: none;">
+    <section id="page-tasks" class="page active">
+      <div class="quick-add">
+        <input id="task-text" type="text" placeholder="Новая задача">
+        <input id="task-due" type="date" title="Срок (необязательно)">
+      </div>
+      <ul id="tasks-list" class="list"></ul>
+    </section>
 
-  <section id="shopping-section">
-    <h2>Покупки</h2>
-    <form id="shopping-form">
-      <input id="shopping-text" type="text" placeholder="Что купить?" required>
-      <button type="submit">Добавить</button>
-    </form>
-    <ul id="shopping-list"></ul>
-  </section>
+    <section id="page-shopping" class="page">
+      <div class="quick-add">
+        <input id="shopping-text" type="text" placeholder="Что купить?">
+      </div>
+      <ul id="shopping-list" class="list"></ul>
+    </section>
+  </div>
+
+  <nav class="tabbar" id="tabbar" style="display: none;">
+    <button class="tab active" data-page="tasks">
+      <span class="icon">📋</span><span>Задачи</span>
+    </button>
+    <button class="tab" data-page="shopping">
+      <span class="icon">🛒</span><span>Покупки</span>
+    </button>
+  </nav>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
@@ -63,24 +140,63 @@
     const db = getFirestore(app);
 
     const statusEl = document.getElementById("status");
-    const tasksSection = document.getElementById("tasks-section");
-    const taskForm = document.getElementById("task-form");
+    const appEl = document.getElementById("app");
+    const tabbarEl = document.getElementById("tabbar");
+    const tasksList = document.getElementById("tasks-list");
+    const shoppingList = document.getElementById("shopping-list");
     const taskTextInput = document.getElementById("task-text");
     const taskDueInput = document.getElementById("task-due");
-    const tasksList = document.getElementById("tasks-list");
-    const shoppingSection = document.getElementById("shopping-section");
-    const shoppingForm = document.getElementById("shopping-form");
     const shoppingTextInput = document.getElementById("shopping-text");
-    const shoppingList = document.getElementById("shopping-list");
 
     const tg = window.Telegram.WebApp;
     tg.ready();
+    tg.expand();
 
     const VERIFY_URL =
       "https://us-central1-family-planner-54d84.cloudfunctions.net/verifyInitData";
 
+    // ---- Навигация между «страницами» (табы внизу) ----
+    let currentPage = "tasks";
+
+    const pages = {
+      tasks: { mainButtonText: "Добавить задачу", add: addTask },
+      shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
+    };
+
+    function switchPage(pageId) {
+      currentPage = pageId;
+      document.querySelectorAll(".page").forEach((el) => {
+        el.classList.toggle("active", el.id === "page-" + pageId);
+      });
+      document.querySelectorAll(".tabbar .tab").forEach((el) => {
+        el.classList.toggle("active", el.dataset.page === pageId);
+      });
+      tg.MainButton.setText(pages[pageId].mainButtonText);
+    }
+
+    document.querySelectorAll(".tabbar .tab").forEach((btn) => {
+      btn.addEventListener("click", () => switchPage(btn.dataset.page));
+    });
+
+    tg.MainButton.onClick(() => {
+      pages[currentPage].add();
+    });
+
+    function haptic(type) {
+      if (tg.HapticFeedback) {
+        if (type === "error") tg.HapticFeedback.notificationOccurred("error");
+        else if (type === "success") tg.HapticFeedback.notificationOccurred("success");
+        else tg.HapticFeedback.impactOccurred("light");
+      }
+    }
+
+    // ---- Задачи ----
     function renderTasks(snapshot) {
       tasksList.innerHTML = "";
+      if (snapshot.empty) {
+        tasksList.innerHTML = '<li class="empty" style="background:none;">Пока пусто — добавьте первую задачу</li>';
+        return;
+      }
       snapshot.forEach((docSnap) => {
         const task = docSnap.data();
         const li = document.createElement("li");
@@ -88,10 +204,12 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.addEventListener("change", async () => {
+          haptic();
           await updateDoc(doc(db, "tasks", docSnap.id), { status: "done" });
         });
 
         const text = document.createElement("span");
+        text.className = "text";
         text.textContent = task.text;
 
         li.appendChild(checkbox);
@@ -119,8 +237,34 @@
       });
     }
 
+    async function addTask() {
+      const text = taskTextInput.value.trim();
+      if (!text) {
+        haptic("error");
+        taskTextInput.focus();
+        return;
+      }
+
+      await addDoc(collection(db, "tasks"), {
+        text,
+        dueDate: taskDueInput.value || null,
+        status: "open",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      taskTextInput.value = "";
+      taskDueInput.value = "";
+      haptic("success");
+    }
+
+    // ---- Покупки ----
     function renderShopping(snapshot) {
       shoppingList.innerHTML = "";
+      if (snapshot.empty) {
+        shoppingList.innerHTML = '<li class="empty" style="background:none;">Список пуст</li>';
+        return;
+      }
       snapshot.forEach((docSnap) => {
         const item = docSnap.data();
         const li = document.createElement("li");
@@ -128,6 +272,7 @@
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
         checkbox.addEventListener("change", async () => {
+          haptic();
           await updateDoc(doc(db, "shopping_items", docSnap.id), {
             status: "bought",
             boughtAt: serverTimestamp(),
@@ -135,6 +280,7 @@
         });
 
         const text = document.createElement("span");
+        text.className = "text";
         text.textContent = item.text;
 
         li.appendChild(checkbox);
@@ -154,10 +300,13 @@
       });
     }
 
-    shoppingForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    async function addShoppingItem() {
       const text = shoppingTextInput.value.trim();
-      if (!text) return;
+      if (!text) {
+        haptic("error");
+        shoppingTextInput.focus();
+        return;
+      }
 
       await addDoc(collection(db, "shopping_items"), {
         text,
@@ -168,25 +317,10 @@
       });
 
       shoppingTextInput.value = "";
-    });
+      haptic("success");
+    }
 
-    taskForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const text = taskTextInput.value.trim();
-      if (!text) return;
-
-      await addDoc(collection(db, "tasks"), {
-        text,
-        dueDate: taskDueInput.value || null,
-        status: "open",
-        authorUid: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-      });
-
-      taskTextInput.value = "";
-      taskDueInput.value = "";
-    });
-
+    // ---- Вход ----
     async function signIn() {
       if (!tg.initData) {
         statusEl.textContent = "Открой это приложение из Telegram-бота.";
@@ -214,9 +348,14 @@
 
         const { token } = await response.json();
         await signInWithCustomToken(auth, token);
-        statusEl.textContent = "Готово! Вход выполнен как " + auth.currentUser.uid;
-        tasksSection.style.display = "block";
-        shoppingSection.style.display = "block";
+
+        statusEl.style.display = "none";
+        appEl.style.display = "block";
+        tabbarEl.style.display = "flex";
+        switchPage("tasks");
+        tg.MainButton.color = tg.themeParams.button_color || "#2481cc";
+        tg.MainButton.show();
+
         startTasksListener();
         startShoppingListener();
       } catch (err) {
