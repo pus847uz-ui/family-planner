@@ -49,33 +49,38 @@ function checkTelegramInitData(initData, botToken) {
 exports.verifyInitData = onRequest(
   { secrets: [BOT_TOKEN], cors: true },
   async (req, res) => {
-    if (req.method !== "POST") {
-      res.status(405).send("Method Not Allowed");
-      return;
+    try {
+      if (req.method !== "POST") {
+        res.status(405).send("Method Not Allowed");
+        return;
+      }
+
+      const { initData } = req.body || {};
+      if (!initData) {
+        res.status(400).json({ error: "initData is required" });
+        return;
+      }
+
+      const user = checkTelegramInitData(initData, BOT_TOKEN.value());
+      if (!user) {
+        res.status(401).json({ error: "Invalid or expired initData" });
+        return;
+      }
+
+      const uid = String(user.id);
+
+      const whitelistDoc = await admin.firestore().collection("users").doc(uid).get();
+      if (!whitelistDoc.exists) {
+        res.status(403).json({ error: "Not a family member" });
+        return;
+      }
+
+      const customToken = await admin.auth().createCustomToken(uid);
+      res.status(200).json({ token: customToken });
+    } catch (err) {
+      console.error("verifyInitData failed:", err);
+      res.status(500).json({ error: "Internal error", detail: err.message });
     }
-
-    const { initData } = req.body || {};
-    if (!initData) {
-      res.status(400).json({ error: "initData is required" });
-      return;
-    }
-
-    const user = checkTelegramInitData(initData, BOT_TOKEN.value());
-    if (!user) {
-      res.status(401).json({ error: "Invalid or expired initData" });
-      return;
-    }
-
-    const uid = String(user.id);
-
-    const whitelistDoc = await admin.firestore().collection("users").doc(uid).get();
-    if (!whitelistDoc.exists) {
-      res.status(403).json({ error: "Not a family member" });
-      return;
-    }
-
-    const customToken = await admin.auth().createCustomToken(uid);
-    res.status(200).json({ token: customToken });
   }
 );
 

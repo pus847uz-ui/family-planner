@@ -49,10 +49,13 @@
         });
 
         if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
           if (response.status === 403) {
             statusEl.textContent = "Доступ запрещён: тебя нет в списке семьи.";
           } else {
-            statusEl.textContent = "Не удалось проверить доступ (ошибка " + response.status + ").";
+            statusEl.textContent =
+              "Не удалось проверить доступ (ошибка " + response.status + "): " +
+              (body.detail || body.error || "нет подробностей");
           }
           return;
         }
