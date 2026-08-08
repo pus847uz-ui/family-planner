@@ -18,5 +18,9 @@ service cloud.firestore {
     match /shopping_items/{itemId} {
       allow read, write: if isFamilyMember();
     }
+
+    match /events/{eventId} {
+      allow read, write: if isFamilyMember();
+    }
   }
 }

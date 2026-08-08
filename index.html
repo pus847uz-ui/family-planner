@@ -21,10 +21,13 @@
     }
     .page { display: none; }
     .page.active { display: block; }
-    .quick-add { display: flex; gap: 8px; margin: 8px 0 16px; }
+    .quick-add { display: flex; gap: 8px; margin: 8px 0 16px; flex-wrap: wrap; }
     .quick-add input[type="text"] {
       flex: 1;
-      min-width: 0;
+      min-width: 140px;
+    }
+    .quick-add input[type="date"], .quick-add input[type="time"] {
+      flex: 0 0 auto;
     }
     input[type="text"], input[type="date"] {
       padding: 12px;
@@ -106,6 +109,15 @@
       </div>
       <ul id="shopping-list" class="list"></ul>
     </section>
+
+    <section id="page-calendar" class="page">
+      <div class="quick-add">
+        <input id="event-text" type="text" placeholder="Событие">
+        <input id="event-date" type="date">
+        <input id="event-time" type="time">
+      </div>
+      <ul id="events-list" class="list"></ul>
+    </section>
   </div>
 
   <nav class="tabbar" id="tabbar" style="display: none;">
@@ -114,6 +126,9 @@
     </button>
     <button class="tab" data-page="shopping">
       <span class="icon">🛒</span><span>Покупки</span>
+    </button>
+    <button class="tab" data-page="calendar">
+      <span class="icon">📅</span><span>Календарь</span>
     </button>
   </nav>
 
@@ -147,6 +162,10 @@
     const taskTextInput = document.getElementById("task-text");
     const taskDueInput = document.getElementById("task-due");
     const shoppingTextInput = document.getElementById("shopping-text");
+    const eventsList = document.getElementById("events-list");
+    const eventTextInput = document.getElementById("event-text");
+    const eventDateInput = document.getElementById("event-date");
+    const eventTimeInput = document.getElementById("event-time");
 
     const tg = window.Telegram.WebApp;
     tg.ready();
@@ -161,6 +180,7 @@
     const pages = {
       tasks: { mainButtonText: "Добавить задачу", add: addTask },
       shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
+      calendar: { mainButtonText: "Добавить событие", add: addEvent },
     };
 
     function switchPage(pageId) {
@@ -320,6 +340,71 @@
       haptic("success");
     }
 
+    // ---- Календарь ----
+    function localDateStr(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, "0");
+      const d = String(date.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function renderEvents(snapshot) {
+      eventsList.innerHTML = "";
+      if (snapshot.empty) {
+        eventsList.innerHTML = '<li class="empty" style="background:none;">Ближайших событий нет</li>';
+        return;
+      }
+      snapshot.forEach((docSnap) => {
+        const eventItem = docSnap.data();
+        const li = document.createElement("li");
+
+        const text = document.createElement("span");
+        text.className = "text";
+        text.textContent = eventItem.text;
+
+        const when = document.createElement("span");
+        when.className = "due";
+        when.textContent = eventItem.date + (eventItem.time ? " " + eventItem.time : "");
+
+        li.appendChild(text);
+        li.appendChild(when);
+        eventsList.appendChild(li);
+      });
+    }
+
+    function startEventsListener() {
+      const eventsQuery = query(
+        collection(db, "events"),
+        where("date", ">=", localDateStr(new Date())),
+        orderBy("date", "asc")
+      );
+      onSnapshot(eventsQuery, renderEvents, (err) => {
+        statusEl.textContent = "Ошибка загрузки календаря: " + err.message;
+      });
+    }
+
+    async function addEvent() {
+      const text = eventTextInput.value.trim();
+      if (!text || !eventDateInput.value) {
+        haptic("error");
+        (text ? eventDateInput : eventTextInput).focus();
+        return;
+      }
+
+      await addDoc(collection(db, "events"), {
+        text,
+        date: eventDateInput.value,
+        time: eventTimeInput.value || null,
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      eventTextInput.value = "";
+      eventDateInput.value = "";
+      eventTimeInput.value = "";
+      haptic("success");
+    }
+
     // ---- Вход ----
     async function signIn() {
       if (!tg.initData) {
@@ -358,6 +443,7 @@
 
         startTasksListener();
         startShoppingListener();
+        startEventsListener();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;
       }
