@@ -4,9 +4,25 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Family Planner</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
   <h1>Family Planner</h1>
-  <p>Страница работает. Это проверка, что GitHub Pages публикует сайт.</p>
+  <p>Страница работает. Ниже — данные, которые прислал Telegram.</p>
+  <pre id="init-data" style="white-space: pre-wrap; word-break: break-all;"></pre>
+
+  <script>
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+
+    const el = document.getElementById("init-data");
+    if (tg.initData) {
+      el.textContent = "initData (сырая строка):\n" + tg.initData
+        + "\n\ninitDataUnsafe (для отображения, не для проверки):\n"
+        + JSON.stringify(tg.initDataUnsafe, null, 2);
+    } else {
+      el.textContent = "initData пустой — похоже, страница открыта не из Telegram.";
+    }
+  </script>
 </body>
 </html>
