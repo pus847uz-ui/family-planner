@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { onRequest } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
@@ -82,6 +83,62 @@ exports.verifyInitData = onRequest(
     } catch (err) {
       console.error("verifyInitData failed:", err);
       res.status(500).json({ error: "Internal error", detail: err.message });
+    }
+  }
+);
+
+const REMINDER_TIMEZONE = "Asia/Karachi";
+
+function isoDateInTimeZone(timeZone, offsetDays = 0) {
+  const now = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(now);
+}
+
+async function sendTelegramMessage(botToken, chatId, text) {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+  if (!response.ok) {
+    console.error("sendTelegramMessage failed:", await response.text());
+  }
+}
+
+exports.sendTaskReminders = onSchedule(
+  { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
+  async () => {
+    const db = getFirestore();
+    const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+    const tomorrow = isoDateInTimeZone(REMINDER_TIMEZONE, 1);
+
+    const [tasksSnap, usersSnap] = await Promise.all([
+      db.collection("tasks").where("status", "==", "open").get(),
+      db.collection("users").get(),
+    ]);
+    const chatIds = usersSnap.docs.map((d) => d.id);
+
+    for (const taskDoc of tasksSnap.docs) {
+      const task = taskDoc.data();
+      if (!task.dueDate) continue;
+
+      let messageText = null;
+      const updates = {};
+
+      if (task.dueDate === tomorrow && !task.reminded1Day) {
+        messageText = `Напоминание: завтра дедлайн задачи "${task.text}"`;
+        updates.reminded1Day = true;
+      } else if (task.dueDate === today && !task.remindedDueDay) {
+        messageText = `Напоминание: сегодня дедлайн задачи "${task.text}"`;
+        updates.remindedDueDay = true;
+      }
+
+      if (messageText) {
+        await Promise.all(
+          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
+        );
+        await taskDoc.ref.update(updates);
+      }
     }
   }
 );
