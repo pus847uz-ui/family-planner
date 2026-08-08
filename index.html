@@ -5,14 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Family Planner</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 12px; }
+    #tasks-section { display: none; margin-top: 20px; }
+    #task-form { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+    #task-text { flex: 1; min-width: 150px; padding: 6px; }
+    #task-due { padding: 6px; }
+    button { padding: 6px 12px; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid #ddd; }
+    li .due { color: #888; font-size: 0.9em; }
+  </style>
 </head>
 <body>
   <h1>Family Planner</h1>
   <div id="status">Проверяем доступ...</div>
 
+  <section id="tasks-section">
+    <h2>Задачи</h2>
+    <form id="task-form">
+      <input id="task-text" type="text" placeholder="Что нужно сделать?" required>
+      <input id="task-due" type="date">
+      <button type="submit">Добавить</button>
+    </form>
+    <ul id="tasks-list"></ul>
+  </section>
+
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import {
+      getFirestore, collection, addDoc, doc, updateDoc,
+      query, where, orderBy, onSnapshot, serverTimestamp,
+    } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
     const firebaseConfig = {
       projectId: "family-planner-54d84",
@@ -26,14 +51,77 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
+    const db = getFirestore(app);
 
     const statusEl = document.getElementById("status");
+    const tasksSection = document.getElementById("tasks-section");
+    const taskForm = document.getElementById("task-form");
+    const taskTextInput = document.getElementById("task-text");
+    const taskDueInput = document.getElementById("task-due");
+    const tasksList = document.getElementById("tasks-list");
 
     const tg = window.Telegram.WebApp;
     tg.ready();
 
     const VERIFY_URL =
       "https://us-central1-family-planner-54d84.cloudfunctions.net/verifyInitData";
+
+    function renderTasks(snapshot) {
+      tasksList.innerHTML = "";
+      snapshot.forEach((docSnap) => {
+        const task = docSnap.data();
+        const li = document.createElement("li");
+
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.addEventListener("change", async () => {
+          await updateDoc(doc(db, "tasks", docSnap.id), { status: "done" });
+        });
+
+        const text = document.createElement("span");
+        text.textContent = task.text;
+
+        li.appendChild(checkbox);
+        li.appendChild(text);
+
+        if (task.dueDate) {
+          const due = document.createElement("span");
+          due.className = "due";
+          due.textContent = task.dueDate;
+          li.appendChild(due);
+        }
+
+        tasksList.appendChild(li);
+      });
+    }
+
+    function startTasksListener() {
+      const tasksQuery = query(
+        collection(db, "tasks"),
+        where("status", "==", "open"),
+        orderBy("createdAt", "desc")
+      );
+      onSnapshot(tasksQuery, renderTasks, (err) => {
+        statusEl.textContent = "Ошибка загрузки задач: " + err.message;
+      });
+    }
+
+    taskForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const text = taskTextInput.value.trim();
+      if (!text) return;
+
+      await addDoc(collection(db, "tasks"), {
+        text,
+        dueDate: taskDueInput.value || null,
+        status: "open",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      taskTextInput.value = "";
+      taskDueInput.value = "";
+    });
 
     async function signIn() {
       if (!tg.initData) {
@@ -63,6 +151,8 @@
         const { token } = await response.json();
         await signInWithCustomToken(auth, token);
         statusEl.textContent = "Готово! Вход выполнен как " + auth.currentUser.uid;
+        tasksSection.style.display = "block";
+        startTasksListener();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;
       }
