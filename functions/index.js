@@ -1,9 +1,11 @@
 const crypto = require("crypto");
 const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
-const admin = require("firebase-admin");
+const { initializeApp } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const { getAuth } = require("firebase-admin/auth");
 
-admin.initializeApp();
+initializeApp();
 
 const BOT_TOKEN = defineSecret("BOT_TOKEN");
 const MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60;
@@ -69,13 +71,13 @@ exports.verifyInitData = onRequest(
 
       const uid = String(user.id);
 
-      const whitelistDoc = await admin.firestore().collection("users").doc(uid).get();
+      const whitelistDoc = await getFirestore().collection("users").doc(uid).get();
       if (!whitelistDoc.exists) {
         res.status(403).json({ error: "Not a family member" });
         return;
       }
 
-      const customToken = await admin.auth().createCustomToken(uid);
+      const customToken = await getAuth().createCustomToken(uid);
       res.status(200).json({ token: customToken });
     } catch (err) {
       console.error("verifyInitData failed:", err);
@@ -84,6 +86,3 @@ exports.verifyInitData = onRequest(
   }
 );
 
-exports.helloWorld = onRequest((req, res) => {
-  res.send("Hello from Firebase Cloud Functions!");
-});
