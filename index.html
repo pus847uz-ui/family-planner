@@ -8,21 +8,64 @@
 </head>
 <body>
   <h1>Family Planner</h1>
-  <p>Страница работает. Ниже — данные, которые прислал Telegram.</p>
-  <pre id="init-data" style="white-space: pre-wrap; word-break: break-all;"></pre>
+  <div id="status">Проверяем доступ...</div>
 
-  <script>
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+    import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+    const firebaseConfig = {
+      projectId: "family-planner-54d84",
+      appId: "1:688518650414:web:8986f3add72df0ca8e5dbf",
+      storageBucket: "family-planner-54d84.firebasestorage.app",
+      apiKey: "AIzaSyCx7ENumcKmfr_-j3_g0mi5h0-FtTOLIOQ",
+      authDomain: "family-planner-54d84.firebaseapp.com",
+      messagingSenderId: "688518650414",
+      measurementId: "G-ZJWGHZ7B8F",
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+
+    const statusEl = document.getElementById("status");
+
     const tg = window.Telegram.WebApp;
     tg.ready();
 
-    const el = document.getElementById("init-data");
-    if (tg.initData) {
-      el.textContent = "initData (сырая строка):\n" + tg.initData
-        + "\n\ninitDataUnsafe (для отображения, не для проверки):\n"
-        + JSON.stringify(tg.initDataUnsafe, null, 2);
-    } else {
-      el.textContent = "initData пустой — похоже, страница открыта не из Telegram.";
+    const VERIFY_URL =
+      "https://us-central1-family-planner-54d84.cloudfunctions.net/verifyInitData";
+
+    async function signIn() {
+      if (!tg.initData) {
+        statusEl.textContent = "Открой это приложение из Telegram-бота.";
+        return;
+      }
+
+      try {
+        const response = await fetch(VERIFY_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ initData: tg.initData }),
+        });
+
+        if (!response.ok) {
+          if (response.status === 403) {
+            statusEl.textContent = "Доступ запрещён: тебя нет в списке семьи.";
+          } else {
+            statusEl.textContent = "Не удалось проверить доступ (ошибка " + response.status + ").";
+          }
+          return;
+        }
+
+        const { token } = await response.json();
+        await signInWithCustomToken(auth, token);
+        statusEl.textContent = "Готово! Вход выполнен как " + auth.currentUser.uid;
+      } catch (err) {
+        statusEl.textContent = "Ошибка: " + err.message;
+      }
     }
+
+    signIn();
   </script>
 </body>
 </html>
