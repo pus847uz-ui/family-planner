@@ -1,0 +1,23 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for family-planner",
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "scripts": {
+    "serve": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first firebase emulators:start --only functions",
+    "shell": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "cross-env NODE_OPTIONS=--dns-result-order=ipv4first firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.2.0",
+    "firebase-functions": "^7.3.2"
+  },
+  "private": true,
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}
