@@ -34,5 +34,17 @@ service cloud.firestore {
     match /recurring_payments/{paymentId} {
       allow read, write: if isFamilyMember();
     }
+
+    match /plans/{planId} {
+      allow read, write: if isFamilyMember();
+    }
+
+    match /plan_checklist_items/{itemId} {
+      allow read, write: if isFamilyMember();
+    }
+
+    match /plan_menu_items/{itemId} {
+      allow read, write: if isFamilyMember();
+    }
   }
 }

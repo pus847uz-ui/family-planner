@@ -296,6 +296,90 @@
       background: var(--tg-theme-button-color, #2481cc);
       color: var(--tg-theme-button-text-color, #ffffff);
     }
+
+    .plan-card { flex-direction: column; align-items: stretch; gap: 4px; cursor: pointer; }
+    .plan-card-header { display: flex; justify-content: space-between; gap: 8px; }
+    .status-badge {
+      font-size: 12px;
+      color: var(--tg-theme-hint-color, #999999);
+    }
+    #plan-view-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #plan-view-header h2 { margin: 0; font-size: 18px; }
+    .plan-meta {
+      font-size: 14px;
+      color: var(--tg-theme-hint-color, #999999);
+      margin: 4px 0 16px;
+    }
+    .option-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .option-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 20px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      font-size: 13px;
+    }
+    .option-chip button {
+      border: none;
+      background: none;
+      color: var(--tg-theme-destructive-text-color, #e53935);
+      font-size: 14px;
+      padding: 0;
+    }
+    .vote-option {
+      padding: 12px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .vote-option-header { display: flex; justify-content: space-between; align-items: center; }
+    .vote-buttons { display: flex; gap: 8px; margin-top: 8px; }
+    .vote-btn {
+      flex: 1;
+      border: none;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 14px;
+      background: var(--tg-theme-bg-color, #ffffff);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    .vote-btn.active { background: var(--tg-theme-button-color, #2481cc); color: var(--tg-theme-button-text-color, #ffffff); }
+    .vote-names { font-size: 12px; color: var(--tg-theme-hint-color, #999999); margin-top: 4px; }
+    .decide-btn {
+      width: 100%;
+      margin-top: 8px;
+      border: none;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 13px;
+      background: #2e7d32;
+      color: #ffffff;
+    }
+    .discussion-placeholder {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      padding: 16px;
+      text-align: center;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      border-radius: 12px;
+      margin-top: 16px;
+    }
+    .small-btn {
+      flex-shrink: 0;
+      border: none;
+      border-radius: 10px;
+      padding: 0 16px;
+      font-size: 14px;
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+    h3 { font-size: 14px; color: var(--tg-theme-hint-color, #999999); margin: 16px 0 8px; }
   </style>
 </head>
 <body>
@@ -324,6 +408,21 @@
           <span class="home-tile-icon">💰</span>
           <span class="home-tile-title">Бюджет</span>
           <span class="home-tile-stat" id="home-stat-budget"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="trips">
+          <span class="home-tile-icon">✈️</span>
+          <span class="home-tile-title">Поездки</span>
+          <span class="home-tile-stat" id="home-stat-trips"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="leisure">
+          <span class="home-tile-icon">🎲</span>
+          <span class="home-tile-title">Досуг</span>
+          <span class="home-tile-stat" id="home-stat-leisure"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="meals">
+          <span class="home-tile-icon">🍽</span>
+          <span class="home-tile-title">Приёмы пищи</span>
+          <span class="home-tile-stat" id="home-stat-meals"></span>
         </button>
       </div>
     </section>
@@ -471,6 +570,172 @@
         <ul id="recurring-list" class="list"></ul>
       </div>
     </section>
+
+    <section id="page-trips" class="page">
+      <div id="trips-list-view">
+        <div class="event-form">
+          <input id="trip-title" type="text" placeholder="Название поездки">
+          <input id="trip-destination" type="text" placeholder="Направление">
+          <div class="event-form-row">
+            <label>Даты</label>
+            <input id="trip-start-date" type="date">
+            <input id="trip-end-date" type="date">
+          </div>
+          <div class="event-form-row">
+            <input id="trip-budget" type="number" step="0.01" min="0" placeholder="Бюджет (необязательно)">
+            <select id="trip-currency"></select>
+          </div>
+        </div>
+        <ul id="trips-list" class="list"></ul>
+      </div>
+
+      <div id="trip-detail-view" style="display: none;">
+        <div id="plan-view-header">
+          <h2 id="trip-detail-title"></h2>
+          <button type="button" id="trip-edit-btn" class="text-btn">✏️ Изменить</button>
+        </div>
+        <div id="trip-edit-form" class="event-form" style="display: none;">
+          <input id="trip-edit-title" type="text" placeholder="Название поездки">
+          <input id="trip-edit-destination" type="text" placeholder="Направление">
+          <div class="event-form-row">
+            <label>Даты</label>
+            <input id="trip-edit-start-date" type="date">
+            <input id="trip-edit-end-date" type="date">
+          </div>
+          <div class="event-form-row">
+            <input id="trip-edit-budget" type="number" step="0.01" min="0" placeholder="Бюджет">
+            <select id="trip-edit-currency"></select>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="trip-edit-save-btn" class="text-btn">Сохранить</button>
+            <button type="button" id="trip-edit-cancel-btn" class="text-btn">Отмена</button>
+          </div>
+        </div>
+        <div id="trip-detail-meta" class="plan-meta"></div>
+        <select id="trip-status-select">
+          <option value="planned">В планах</option>
+          <option value="confirmed">Подтверждена</option>
+          <option value="completed">Завершена</option>
+        </select>
+        <button type="button" id="trip-open-budget-btn" class="text-btn" style="display: none;">💰 Открыть бюджет поездки</button>
+
+        <h3>Чек-лист</h3>
+        <div class="quick-add">
+          <input id="trip-checklist-text" type="text" placeholder="Пункт чек-листа">
+          <button type="button" id="trip-checklist-add-btn" class="small-btn">+</button>
+        </div>
+        <ul id="trip-checklist-list" class="list"></ul>
+
+        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+
+        <div class="form-actions">
+          <button type="button" id="trip-delete-btn" class="text-btn danger">Удалить поездку</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-leisure" class="page">
+      <div id="leisure-list-view">
+        <div class="event-form">
+          <input id="leisure-title" type="text" placeholder="Название активности">
+          <input id="leisure-description" type="text" placeholder="Описание (необязательно)">
+          <div class="event-form-row">
+            <input id="leisure-date-option" type="date">
+            <button type="button" id="leisure-add-date-btn" class="small-btn">+ Дата</button>
+          </div>
+          <div class="option-chips" id="leisure-date-chips"></div>
+        </div>
+        <ul id="leisure-list" class="list"></ul>
+      </div>
+
+      <div id="leisure-detail-view" style="display: none;">
+        <div id="plan-view-header">
+          <h2 id="leisure-detail-title"></h2>
+          <button type="button" id="leisure-edit-btn" class="text-btn">✏️ Изменить</button>
+        </div>
+        <div id="leisure-edit-form" class="event-form" style="display: none;">
+          <input id="leisure-edit-title" type="text" placeholder="Название">
+          <input id="leisure-edit-description" type="text" placeholder="Описание">
+          <div class="form-actions">
+            <button type="button" id="leisure-edit-save-btn" class="text-btn">Сохранить</button>
+            <button type="button" id="leisure-edit-cancel-btn" class="text-btn">Отмена</button>
+          </div>
+        </div>
+        <div id="leisure-detail-meta" class="plan-meta"></div>
+        <div id="leisure-options-list"></div>
+
+        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+
+        <div class="form-actions">
+          <button type="button" id="leisure-delete-btn" class="text-btn danger">Удалить предложение</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-meals" class="page">
+      <div id="meals-list-view">
+        <div class="event-form">
+          <input id="meal-title" type="text" placeholder="Название (необязательно)">
+          <div class="event-form-row">
+            <input id="meal-date" type="date">
+            <input id="meal-time" type="time">
+          </div>
+          <select id="meal-type">
+            <option value="home">Дома</option>
+            <option value="restaurant">Ресторан</option>
+            <option value="cafe">Кафе</option>
+          </select>
+          <div class="event-form-row" id="meal-place-option-row" style="display: none;">
+            <input id="meal-place-option" type="text" placeholder="Вариант места">
+            <button type="button" id="meal-add-place-btn" class="small-btn">+ Место</button>
+          </div>
+          <div class="option-chips" id="meal-place-chips"></div>
+        </div>
+        <ul id="meals-list" class="list"></ul>
+      </div>
+
+      <div id="meal-detail-view" style="display: none;">
+        <div id="plan-view-header">
+          <h2 id="meal-detail-title"></h2>
+          <button type="button" id="meal-edit-btn" class="text-btn">✏️ Изменить</button>
+        </div>
+        <div id="meal-edit-form" class="event-form" style="display: none;">
+          <input id="meal-edit-title" type="text" placeholder="Название">
+          <div class="event-form-row">
+            <input id="meal-edit-date" type="date">
+            <input id="meal-edit-time" type="time">
+          </div>
+          <div class="form-actions">
+            <button type="button" id="meal-edit-save-btn" class="text-btn">Сохранить</button>
+            <button type="button" id="meal-edit-cancel-btn" class="text-btn">Отмена</button>
+          </div>
+        </div>
+        <div id="meal-detail-meta" class="plan-meta"></div>
+
+        <div id="meal-places-section">
+          <h3>Варианты места</h3>
+          <div id="meal-options-list"></div>
+        </div>
+
+        <div id="meal-menu-section">
+          <h3>Меню</h3>
+          <div class="quick-add">
+            <input id="meal-menu-text" type="text" placeholder="Блюдо/продукт">
+          </div>
+          <select id="meal-menu-assignee" style="width: 100%; margin-bottom: 12px;">
+            <option value="">Не назначено</option>
+          </select>
+          <button type="button" id="meal-menu-add-btn" class="small-btn" style="width: 100%; margin-bottom: 12px;">Добавить в меню</button>
+          <ul id="meal-menu-list" class="list"></ul>
+        </div>
+
+        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+
+        <div class="form-actions">
+          <button type="button" id="meal-delete-btn" class="text-btn danger">Удалить приём пищи</button>
+        </div>
+      </div>
+    </section>
   </div>
 
   <div id="map-modal" class="modal-overlay" style="display: none;">
@@ -491,7 +756,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
-      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, writeBatch,
+      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, writeBatch, deleteField,
       query, where, orderBy, onSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -584,6 +849,89 @@
     const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
 
+    const homeStatTripsEl = document.getElementById("home-stat-trips");
+    const homeStatLeisureEl = document.getElementById("home-stat-leisure");
+    const homeStatMealsEl = document.getElementById("home-stat-meals");
+
+    // Поездки
+    const tripsListView = document.getElementById("trips-list-view");
+    const tripDetailView = document.getElementById("trip-detail-view");
+    const tripTitleInput = document.getElementById("trip-title");
+    const tripDestinationInput = document.getElementById("trip-destination");
+    const tripStartDateInput = document.getElementById("trip-start-date");
+    const tripEndDateInput = document.getElementById("trip-end-date");
+    const tripBudgetInput = document.getElementById("trip-budget");
+    const tripCurrencySelect = document.getElementById("trip-currency");
+    const tripsListEl = document.getElementById("trips-list");
+    const tripDetailTitleEl = document.getElementById("trip-detail-title");
+    const tripEditBtn = document.getElementById("trip-edit-btn");
+    const tripEditForm = document.getElementById("trip-edit-form");
+    const tripEditTitleInput = document.getElementById("trip-edit-title");
+    const tripEditDestinationInput = document.getElementById("trip-edit-destination");
+    const tripEditStartDateInput = document.getElementById("trip-edit-start-date");
+    const tripEditEndDateInput = document.getElementById("trip-edit-end-date");
+    const tripEditBudgetInput = document.getElementById("trip-edit-budget");
+    const tripEditCurrencySelect = document.getElementById("trip-edit-currency");
+    const tripEditSaveBtn = document.getElementById("trip-edit-save-btn");
+    const tripEditCancelBtn = document.getElementById("trip-edit-cancel-btn");
+    const tripDetailMetaEl = document.getElementById("trip-detail-meta");
+    const tripStatusSelect = document.getElementById("trip-status-select");
+    const tripOpenBudgetBtn = document.getElementById("trip-open-budget-btn");
+    const tripChecklistTextInput = document.getElementById("trip-checklist-text");
+    const tripChecklistAddBtn = document.getElementById("trip-checklist-add-btn");
+    const tripChecklistListEl = document.getElementById("trip-checklist-list");
+    const tripDeleteBtn = document.getElementById("trip-delete-btn");
+
+    // Досуг
+    const leisureListView = document.getElementById("leisure-list-view");
+    const leisureDetailView = document.getElementById("leisure-detail-view");
+    const leisureTitleInput = document.getElementById("leisure-title");
+    const leisureDescriptionInput = document.getElementById("leisure-description");
+    const leisureDateOptionInput = document.getElementById("leisure-date-option");
+    const leisureAddDateBtn = document.getElementById("leisure-add-date-btn");
+    const leisureDateChipsEl = document.getElementById("leisure-date-chips");
+    const leisureListEl = document.getElementById("leisure-list");
+    const leisureDetailTitleEl = document.getElementById("leisure-detail-title");
+    const leisureEditBtn = document.getElementById("leisure-edit-btn");
+    const leisureEditForm = document.getElementById("leisure-edit-form");
+    const leisureEditTitleInput = document.getElementById("leisure-edit-title");
+    const leisureEditDescriptionInput = document.getElementById("leisure-edit-description");
+    const leisureEditSaveBtn = document.getElementById("leisure-edit-save-btn");
+    const leisureEditCancelBtn = document.getElementById("leisure-edit-cancel-btn");
+    const leisureDetailMetaEl = document.getElementById("leisure-detail-meta");
+    const leisureOptionsListEl = document.getElementById("leisure-options-list");
+    const leisureDeleteBtn = document.getElementById("leisure-delete-btn");
+
+    // Приёмы пищи
+    const mealsListView = document.getElementById("meals-list-view");
+    const mealDetailView = document.getElementById("meal-detail-view");
+    const mealTitleInput = document.getElementById("meal-title");
+    const mealDateInput = document.getElementById("meal-date");
+    const mealTimeInput = document.getElementById("meal-time");
+    const mealTypeSelect = document.getElementById("meal-type");
+    const mealPlaceOptionRow = document.getElementById("meal-place-option-row");
+    const mealPlaceOptionInput = document.getElementById("meal-place-option");
+    const mealAddPlaceBtn = document.getElementById("meal-add-place-btn");
+    const mealPlaceChipsEl = document.getElementById("meal-place-chips");
+    const mealsListEl = document.getElementById("meals-list");
+    const mealDetailTitleEl = document.getElementById("meal-detail-title");
+    const mealEditBtn = document.getElementById("meal-edit-btn");
+    const mealEditForm = document.getElementById("meal-edit-form");
+    const mealEditTitleInput = document.getElementById("meal-edit-title");
+    const mealEditDateInput = document.getElementById("meal-edit-date");
+    const mealEditTimeInput = document.getElementById("meal-edit-time");
+    const mealEditSaveBtn = document.getElementById("meal-edit-save-btn");
+    const mealEditCancelBtn = document.getElementById("meal-edit-cancel-btn");
+    const mealDetailMetaEl = document.getElementById("meal-detail-meta");
+    const mealPlacesSection = document.getElementById("meal-places-section");
+    const mealOptionsListEl = document.getElementById("meal-options-list");
+    const mealMenuSection = document.getElementById("meal-menu-section");
+    const mealMenuTextInput = document.getElementById("meal-menu-text");
+    const mealMenuAssigneeSelect = document.getElementById("meal-menu-assignee");
+    const mealMenuAddBtn = document.getElementById("meal-menu-add-btn");
+    const mealMenuListEl = document.getElementById("meal-menu-list");
+    const mealDeleteBtn = document.getElementById("meal-delete-btn");
+
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
@@ -599,6 +947,9 @@
       shopping: { mainButtonText: "Добавить покупку", add: saveShoppingItem },
       calendar: { mainButtonText: "Добавить событие", add: saveEvent },
       budget: { mainButtonText: "Создать проект", add: createProject },
+      trips: { mainButtonText: "Создать поездку", add: createTrip },
+      leisure: { mainButtonText: "Предложить активность", add: createLeisure },
+      meals: { mainButtonText: "Запланировать приём пищи", add: createMeal },
     };
 
     function navigateTo(pageId) {
@@ -614,6 +965,15 @@
       if (currentPage === "budget" && pageId !== "budget") {
         if (activeProjectId) closeProjectDetail();
         if (editingRecurringId) resetRecurringForm();
+      }
+      if (currentPage === "trips" && pageId !== "trips" && activeTripId) {
+        closeTripDetail();
+      }
+      if (currentPage === "leisure" && pageId !== "leisure" && activeLeisureId) {
+        closeLeisureDetail();
+      }
+      if (currentPage === "meals" && pageId !== "meals" && activeMealId) {
+        closeMealDetail();
       }
       currentPage = pageId;
       document.querySelectorAll(".page").forEach((el) => {
@@ -864,6 +1224,15 @@
         const pct = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
         homeStatBudgetEl.textContent = `${pct}% лимита`;
       }
+
+      const upcomingTrips = allTrips.filter((t) => t.status !== "completed").length;
+      homeStatTripsEl.textContent = upcomingTrips > 0 ? `${upcomingTrips} в планах` : "нет поездок";
+
+      const openLeisure = allLeisure.filter((l) => l.status === "open").length;
+      homeStatLeisureEl.textContent = openLeisure > 0 ? `${openLeisure} голосование` : "нет предложений";
+
+      const mealsToday = allMeals.filter((m) => m.mealDate === today).length;
+      homeStatMealsEl.textContent = mealsToday > 0 ? `${mealsToday} сегодня` : "нет ближайших";
     }
 
     // ---- Задачи ----
@@ -887,6 +1256,7 @@
         allFamilyUsers = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         populateAssigneeSelect(taskAssigneeSelect);
         populateAssigneeSelect(shoppingAssigneeSelect);
+        populateAssigneeSelect(mealMenuAssigneeSelect);
       });
     }
 
@@ -1310,6 +1680,9 @@
       else if (editingEventId) resetEventForm();
       else if (editingRecurringId) resetRecurringForm();
       else if (activeProjectId) closeProjectDetail();
+      else if (activeTripId) closeTripDetail();
+      else if (activeLeisureId) closeLeisureDetail();
+      else if (activeMealId) closeMealDetail();
       else if (currentPage !== "home") goHome();
     });
 
@@ -1752,6 +2125,817 @@
       });
     }
 
+    // ---- Общий помощник: голосование (используется в Досуге и Приёмах пищи) ----
+    async function toggleReaction(planId, optionKey, value) {
+      const plan = [...allLeisure, ...allMeals].find((p) => p.id === planId);
+      const current = plan && plan.reactions && plan.reactions[optionKey]
+        ? plan.reactions[optionKey][auth.currentUser.uid]
+        : undefined;
+      const fieldPath = `reactions.${optionKey}.${auth.currentUser.uid}`;
+      if (current === value) {
+        await updateDoc(doc(db, "plans", planId), { [fieldPath]: deleteField() });
+      } else {
+        await updateDoc(doc(db, "plans", planId), { [fieldPath]: value });
+      }
+      haptic();
+    }
+
+    function renderVoteOption(container, plan, optionKey, label, onDecide) {
+      const box = document.createElement("div");
+      box.className = "vote-option";
+
+      const header = document.createElement("div");
+      header.className = "vote-option-header";
+      const labelEl = document.createElement("span");
+      labelEl.textContent = label;
+      header.appendChild(labelEl);
+      box.appendChild(header);
+
+      const reactions = (plan.reactions && plan.reactions[optionKey]) || {};
+      const upNames = Object.entries(reactions)
+        .filter(([, v]) => v === "up")
+        .map(([uid]) => assigneeName(uid) || uid);
+      const downNames = Object.entries(reactions)
+        .filter(([, v]) => v === "down")
+        .map(([uid]) => assigneeName(uid) || uid);
+
+      const namesEl = document.createElement("div");
+      namesEl.className = "vote-names";
+      const parts = [];
+      if (upNames.length) parts.push("👍 " + upNames.join(", "));
+      if (downNames.length) parts.push("👎 " + downNames.join(", "));
+      namesEl.textContent = parts.length ? parts.join(" · ") : "Пока никто не проголосовал";
+      box.appendChild(namesEl);
+
+      const myVote = reactions[auth.currentUser.uid];
+      const buttons = document.createElement("div");
+      buttons.className = "vote-buttons";
+      const upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.className = "vote-btn" + (myVote === "up" ? " active" : "");
+      upBtn.textContent = "👍";
+      upBtn.addEventListener("click", () => toggleReaction(plan.id, optionKey, "up"));
+      const downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.className = "vote-btn" + (myVote === "down" ? " active" : "");
+      downBtn.textContent = "👎";
+      downBtn.addEventListener("click", () => toggleReaction(plan.id, optionKey, "down"));
+      buttons.appendChild(upBtn);
+      buttons.appendChild(downBtn);
+      box.appendChild(buttons);
+
+      if (onDecide) {
+        const decideBtn = document.createElement("button");
+        decideBtn.type = "button";
+        decideBtn.className = "decide-btn";
+        decideBtn.textContent = "Выбрать этот вариант";
+        decideBtn.addEventListener("click", onDecide);
+        box.appendChild(decideBtn);
+      }
+
+      container.appendChild(box);
+    }
+
+    // ---- Поездки ----
+    let allTrips = [];
+    let activeTripId = null;
+    let allChecklistItems = [];
+    const TRIP_STATUS_LABELS = { planned: "В планах", confirmed: "Подтверждена", completed: "Завершена" };
+
+    populateCurrencySelect(tripCurrencySelect);
+    populateCurrencySelect(tripEditCurrencySelect);
+
+    function renderTrips() {
+      tripsListEl.innerHTML = "";
+      const sorted = allTrips
+        .slice()
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      if (sorted.length === 0) {
+        tripsListEl.innerHTML = '<li class="empty" style="background:none;">Пока нет поездок</li>';
+        return;
+      }
+      sorted.forEach((trip) => {
+        const li = document.createElement("li");
+        li.className = "plan-card";
+        const header = document.createElement("div");
+        header.className = "plan-card-header";
+        const title = document.createElement("span");
+        title.className = "text";
+        title.textContent = trip.title;
+        const status = document.createElement("span");
+        status.className = "status-badge";
+        status.textContent = TRIP_STATUS_LABELS[trip.status] || trip.status;
+        header.appendChild(title);
+        header.appendChild(status);
+        li.appendChild(header);
+
+        const meta = document.createElement("span");
+        meta.className = "due";
+        meta.textContent = [trip.destination, `${trip.startDate} → ${trip.endDate}`]
+          .filter(Boolean)
+          .join(" · ");
+        li.appendChild(meta);
+
+        li.addEventListener("click", () => openTripDetail(trip.id));
+        tripsListEl.appendChild(li);
+      });
+    }
+
+    function openTripDetail(tripId) {
+      activeTripId = tripId;
+      tripsListView.style.display = "none";
+      tripDetailView.style.display = "block";
+      tg.MainButton.hide();
+      tg.BackButton.show();
+      renderTripDetail();
+    }
+
+    function closeTripDetail() {
+      activeTripId = null;
+      tripDetailView.style.display = "none";
+      tripsListView.style.display = "block";
+      tripEditForm.style.display = "none";
+      if (currentPage === "trips") {
+        tg.MainButton.setText(pages.trips.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    function renderTripDetail() {
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      if (!trip) {
+        closeTripDetail();
+        return;
+      }
+
+      tripDetailTitleEl.textContent = trip.title;
+      tripDetailMetaEl.textContent = [
+        trip.destination,
+        `${trip.startDate} → ${trip.endDate}`,
+        trip.budgetAmount ? `Бюджет: ${formatAmount(trip.budgetAmount, trip.budgetCurrency)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      tripStatusSelect.value = trip.status;
+      tripOpenBudgetBtn.style.display = trip.budgetProjectId ? "block" : "none";
+
+      const items = allChecklistItems.filter((i) => i.planId === activeTripId);
+      tripChecklistListEl.innerHTML = "";
+      if (items.length === 0) {
+        tripChecklistListEl.innerHTML = '<li class="empty" style="background:none;">Пусто</li>';
+      } else {
+        items
+          .slice()
+          .sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0))
+          .forEach((item) => {
+            const li = document.createElement("li");
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = item.status === "done";
+            checkbox.addEventListener("change", async () => {
+              haptic();
+              await updateDoc(doc(db, "plan_checklist_items", item.id), {
+                status: checkbox.checked ? "done" : "open",
+              });
+            });
+            const text = document.createElement("span");
+            text.className = "text";
+            text.textContent = item.text;
+            li.appendChild(checkbox);
+            li.appendChild(text);
+            tripChecklistListEl.appendChild(li);
+          });
+      }
+    }
+
+    tripStatusSelect.addEventListener("change", async () => {
+      if (!activeTripId) return;
+      await updateDoc(doc(db, "plans", activeTripId), { status: tripStatusSelect.value });
+      haptic("success");
+    });
+
+    tripOpenBudgetBtn.addEventListener("click", () => {
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      if (!trip || !trip.budgetProjectId) return;
+      const projectId = trip.budgetProjectId;
+      closeTripDetail();
+      navigateTo("budget");
+      showBudgetSubview("projects");
+      openProjectDetail(projectId);
+    });
+
+    tripChecklistAddBtn.addEventListener("click", async () => {
+      const text = tripChecklistTextInput.value.trim();
+      if (!text || !activeTripId) {
+        haptic("error");
+        return;
+      }
+      await addDoc(collection(db, "plan_checklist_items"), {
+        planId: activeTripId,
+        text,
+        status: "open",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+      tripChecklistTextInput.value = "";
+      haptic("success");
+    });
+
+    tripEditBtn.addEventListener("click", () => {
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      if (!trip) return;
+      tripEditTitleInput.value = trip.title;
+      tripEditDestinationInput.value = trip.destination || "";
+      tripEditStartDateInput.value = trip.startDate;
+      tripEditEndDateInput.value = trip.endDate;
+      tripEditBudgetInput.value = trip.budgetAmount || "";
+      tripEditCurrencySelect.value = trip.budgetCurrency || "USD";
+      tripEditForm.style.display = "flex";
+    });
+
+    tripEditCancelBtn.addEventListener("click", () => {
+      tripEditForm.style.display = "none";
+    });
+
+    tripEditSaveBtn.addEventListener("click", async () => {
+      const title = tripEditTitleInput.value.trim();
+      const startDate = tripEditStartDateInput.value;
+      if (!title || !startDate) {
+        haptic("error");
+        return;
+      }
+      const budgetAmount = Number(tripEditBudgetInput.value) || null;
+      const budgetCurrency = budgetAmount ? tripEditCurrencySelect.value : null;
+
+      await updateDoc(doc(db, "plans", activeTripId), {
+        title,
+        destination: tripEditDestinationInput.value.trim() || null,
+        startDate,
+        endDate: tripEditEndDateInput.value || startDate,
+        budgetAmount,
+        budgetCurrency,
+      });
+
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      if (trip && trip.budgetProjectId && budgetAmount) {
+        await updateDoc(doc(db, "budget_projects", trip.budgetProjectId), {
+          title,
+          limit: budgetAmount,
+          currency: budgetCurrency,
+        });
+      }
+
+      tripEditForm.style.display = "none";
+      haptic("success");
+    });
+
+    tripDeleteBtn.addEventListener("click", async () => {
+      const confirmed = await confirmAction("Удалить поездку вместе с чек-листом? Это необратимо.");
+      if (!confirmed) return;
+      const batch = writeBatch(db);
+      allChecklistItems
+        .filter((i) => i.planId === activeTripId)
+        .forEach((i) => batch.delete(doc(db, "plan_checklist_items", i.id)));
+      batch.delete(doc(db, "plans", activeTripId));
+      await batch.commit();
+      haptic("success");
+      closeTripDetail();
+    });
+
+    async function createTrip() {
+      const title = tripTitleInput.value.trim();
+      const startDate = tripStartDateInput.value;
+      if (!title || !startDate) {
+        haptic("error");
+        (title ? tripStartDateInput : tripTitleInput).focus();
+        return;
+      }
+
+      const budgetAmount = Number(tripBudgetInput.value) || null;
+      const budgetCurrency = budgetAmount ? tripCurrencySelect.value : null;
+
+      let budgetProjectId = null;
+      if (budgetAmount) {
+        const projectRef = await addDoc(collection(db, "budget_projects"), {
+          title,
+          limit: budgetAmount,
+          currency: budgetCurrency,
+          status: "active",
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+        budgetProjectId = projectRef.id;
+      }
+
+      await addDoc(collection(db, "plans"), {
+        type: "trip",
+        title,
+        destination: tripDestinationInput.value.trim() || null,
+        startDate,
+        endDate: tripEndDateInput.value || startDate,
+        budgetAmount,
+        budgetCurrency,
+        budgetProjectId,
+        status: "planned",
+        telegramChatId: null,
+        telegramMessageThreadId: null,
+        telegramTopicLink: null,
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      tripTitleInput.value = "";
+      tripDestinationInput.value = "";
+      tripStartDateInput.value = "";
+      tripEndDateInput.value = "";
+      tripBudgetInput.value = "";
+      haptic("success");
+    }
+
+    // ---- Досуг ----
+    let allLeisure = [];
+    let activeLeisureId = null;
+    let newLeisureDateOptions = [];
+
+    function renderLeisureDateChips() {
+      leisureDateChipsEl.innerHTML = "";
+      newLeisureDateOptions.forEach((d) => {
+        const chip = document.createElement("span");
+        chip.className = "option-chip";
+        const label = document.createElement("span");
+        label.textContent = d;
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.textContent = "✕";
+        removeBtn.addEventListener("click", () => {
+          newLeisureDateOptions = newLeisureDateOptions.filter((x) => x !== d);
+          renderLeisureDateChips();
+        });
+        chip.appendChild(label);
+        chip.appendChild(removeBtn);
+        leisureDateChipsEl.appendChild(chip);
+      });
+    }
+
+    leisureAddDateBtn.addEventListener("click", () => {
+      const d = leisureDateOptionInput.value;
+      if (!d || newLeisureDateOptions.includes(d)) return;
+      newLeisureDateOptions.push(d);
+      leisureDateOptionInput.value = "";
+      renderLeisureDateChips();
+    });
+
+    function renderLeisure() {
+      leisureListEl.innerHTML = "";
+      const sorted = allLeisure
+        .slice()
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      if (sorted.length === 0) {
+        leisureListEl.innerHTML = '<li class="empty" style="background:none;">Пока нет предложений</li>';
+        return;
+      }
+      sorted.forEach((plan) => {
+        const li = document.createElement("li");
+        li.className = "plan-card";
+        const header = document.createElement("div");
+        header.className = "plan-card-header";
+        const title = document.createElement("span");
+        title.className = "text";
+        title.textContent = plan.title;
+        const status = document.createElement("span");
+        status.className = "status-badge";
+        status.textContent = plan.status === "decided" ? `Дата: ${plan.decidedDate}` : "Голосование открыто";
+        header.appendChild(title);
+        header.appendChild(status);
+        li.appendChild(header);
+        li.addEventListener("click", () => openLeisureDetail(plan.id));
+        leisureListEl.appendChild(li);
+      });
+    }
+
+    function openLeisureDetail(planId) {
+      activeLeisureId = planId;
+      leisureListView.style.display = "none";
+      leisureDetailView.style.display = "block";
+      tg.MainButton.hide();
+      tg.BackButton.show();
+      renderLeisureDetail();
+    }
+
+    function closeLeisureDetail() {
+      activeLeisureId = null;
+      leisureDetailView.style.display = "none";
+      leisureListView.style.display = "block";
+      leisureEditForm.style.display = "none";
+      if (currentPage === "leisure") {
+        tg.MainButton.setText(pages.leisure.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    function renderLeisureDetail() {
+      const plan = allLeisure.find((p) => p.id === activeLeisureId);
+      if (!plan) {
+        closeLeisureDetail();
+        return;
+      }
+
+      leisureDetailTitleEl.textContent = plan.title;
+      leisureDetailMetaEl.textContent =
+        plan.description ||
+        (plan.status === "decided" ? `Дата подтверждена: ${plan.decidedDate}` : "Проголосуйте за удобную дату");
+
+      leisureOptionsListEl.innerHTML = "";
+      if (plan.status === "decided") {
+        const p = document.createElement("p");
+        p.textContent = `Итоговая дата: ${plan.decidedDate}`;
+        leisureOptionsListEl.appendChild(p);
+      } else {
+        plan.dateOptions.forEach((dateOption) => {
+          renderVoteOption(leisureOptionsListEl, plan, dateOption, dateOption, () =>
+            decideLeisureDate(plan.id, dateOption)
+          );
+        });
+      }
+    }
+
+    async function decideLeisureDate(planId, dateOption) {
+      const confirmed = await confirmAction(`Подтвердить дату ${dateOption}?`);
+      if (!confirmed) return;
+      const plan = allLeisure.find((p) => p.id === planId);
+      const eventRef = await addDoc(collection(db, "events"), {
+        title: plan.title,
+        startDate: dateOption,
+        startTime: null,
+        endDate: dateOption,
+        endTime: null,
+        place: null,
+        locationUrl: null,
+        startAt: new Date(`${dateOption}T00:00:00`),
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+        reminded1Day: false,
+        reminded2Hours: false,
+      });
+      await updateDoc(doc(db, "plans", planId), {
+        status: "decided",
+        decidedDate: dateOption,
+        linkedEventId: eventRef.id,
+      });
+      haptic("success");
+    }
+
+    leisureEditBtn.addEventListener("click", () => {
+      const plan = allLeisure.find((p) => p.id === activeLeisureId);
+      if (!plan) return;
+      leisureEditTitleInput.value = plan.title;
+      leisureEditDescriptionInput.value = plan.description || "";
+      leisureEditForm.style.display = "flex";
+    });
+
+    leisureEditCancelBtn.addEventListener("click", () => {
+      leisureEditForm.style.display = "none";
+    });
+
+    leisureEditSaveBtn.addEventListener("click", async () => {
+      const title = leisureEditTitleInput.value.trim();
+      if (!title) {
+        haptic("error");
+        return;
+      }
+      await updateDoc(doc(db, "plans", activeLeisureId), {
+        title,
+        description: leisureEditDescriptionInput.value.trim() || null,
+      });
+      leisureEditForm.style.display = "none";
+      haptic("success");
+    });
+
+    leisureDeleteBtn.addEventListener("click", async () => {
+      const confirmed = await confirmAction("Удалить это предложение?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "plans", activeLeisureId));
+      haptic("success");
+      closeLeisureDetail();
+    });
+
+    async function createLeisure() {
+      const title = leisureTitleInput.value.trim();
+      if (!title || newLeisureDateOptions.length === 0) {
+        haptic("error");
+        (title ? leisureDateOptionInput : leisureTitleInput).focus();
+        return;
+      }
+
+      await addDoc(collection(db, "plans"), {
+        type: "leisure",
+        title,
+        description: leisureDescriptionInput.value.trim() || null,
+        dateOptions: newLeisureDateOptions.slice(),
+        reactions: {},
+        decidedDate: null,
+        linkedEventId: null,
+        status: "open",
+        telegramChatId: null,
+        telegramMessageThreadId: null,
+        telegramTopicLink: null,
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      leisureTitleInput.value = "";
+      leisureDescriptionInput.value = "";
+      newLeisureDateOptions = [];
+      renderLeisureDateChips();
+      haptic("success");
+    }
+
+    // ---- Приёмы пищи ----
+    let allMeals = [];
+    let allMenuItems = [];
+    let activeMealId = null;
+    let newMealPlaceOptions = [];
+    const MEAL_TYPE_LABELS = { home: "Дома", restaurant: "Ресторан", cafe: "Кафе" };
+
+    mealTypeSelect.addEventListener("change", () => {
+      mealPlaceOptionRow.style.display = mealTypeSelect.value === "home" ? "none" : "flex";
+    });
+
+    function renderMealPlaceChips() {
+      mealPlaceChipsEl.innerHTML = "";
+      newMealPlaceOptions.forEach((name) => {
+        const chip = document.createElement("span");
+        chip.className = "option-chip";
+        const label = document.createElement("span");
+        label.textContent = name;
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.textContent = "✕";
+        removeBtn.addEventListener("click", () => {
+          newMealPlaceOptions = newMealPlaceOptions.filter((x) => x !== name);
+          renderMealPlaceChips();
+        });
+        chip.appendChild(label);
+        chip.appendChild(removeBtn);
+        mealPlaceChipsEl.appendChild(chip);
+      });
+    }
+
+    mealAddPlaceBtn.addEventListener("click", () => {
+      const name = mealPlaceOptionInput.value.trim();
+      if (!name || newMealPlaceOptions.includes(name)) return;
+      newMealPlaceOptions.push(name);
+      mealPlaceOptionInput.value = "";
+      renderMealPlaceChips();
+    });
+
+    function renderMeals() {
+      mealsListEl.innerHTML = "";
+      const sorted = allMeals.slice().sort((a, b) => (a.mealDate || "").localeCompare(b.mealDate || ""));
+      if (sorted.length === 0) {
+        mealsListEl.innerHTML = '<li class="empty" style="background:none;">Пока нет приёмов пищи</li>';
+        return;
+      }
+      sorted.forEach((meal) => {
+        const li = document.createElement("li");
+        li.className = "plan-card";
+        const header = document.createElement("div");
+        header.className = "plan-card-header";
+        const title = document.createElement("span");
+        title.className = "text";
+        title.textContent = meal.title || MEAL_TYPE_LABELS[meal.mealType];
+        const status = document.createElement("span");
+        status.className = "status-badge";
+        status.textContent = meal.decidedPlace || MEAL_TYPE_LABELS[meal.mealType];
+        header.appendChild(title);
+        header.appendChild(status);
+        li.appendChild(header);
+
+        const meta = document.createElement("span");
+        meta.className = "due";
+        meta.textContent = meal.mealDate + (meal.mealTime ? " " + meal.mealTime : "");
+        li.appendChild(meta);
+
+        li.addEventListener("click", () => openMealDetail(meal.id));
+        mealsListEl.appendChild(li);
+      });
+    }
+
+    function openMealDetail(planId) {
+      activeMealId = planId;
+      mealsListView.style.display = "none";
+      mealDetailView.style.display = "block";
+      tg.MainButton.hide();
+      tg.BackButton.show();
+      renderMealDetail();
+    }
+
+    function closeMealDetail() {
+      activeMealId = null;
+      mealDetailView.style.display = "none";
+      mealsListView.style.display = "block";
+      mealEditForm.style.display = "none";
+      if (currentPage === "meals") {
+        tg.MainButton.setText(pages.meals.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    function renderMealDetail() {
+      const meal = allMeals.find((m) => m.id === activeMealId);
+      if (!meal) {
+        closeMealDetail();
+        return;
+      }
+
+      mealDetailTitleEl.textContent = meal.title || MEAL_TYPE_LABELS[meal.mealType];
+      mealDetailMetaEl.textContent =
+        `${meal.mealDate}${meal.mealTime ? " " + meal.mealTime : ""} · ${MEAL_TYPE_LABELS[meal.mealType]}`;
+
+      if (meal.mealType === "home") {
+        mealPlacesSection.style.display = "none";
+        mealMenuSection.style.display = "block";
+
+        const items = allMenuItems.filter((i) => i.planId === activeMealId);
+        mealMenuListEl.innerHTML = "";
+        if (items.length === 0) {
+          mealMenuListEl.innerHTML = '<li class="empty" style="background:none;">Меню пока пусто</li>';
+        } else {
+          items.forEach((item) => {
+            const li = document.createElement("li");
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = item.status === "done";
+            checkbox.addEventListener("change", async () => {
+              haptic();
+              await updateDoc(doc(db, "plan_menu_items", item.id), {
+                status: checkbox.checked ? "done" : "pending",
+              });
+            });
+            const text = document.createElement("span");
+            text.className = "text";
+            text.textContent = item.text;
+            li.appendChild(checkbox);
+            li.appendChild(text);
+            if (item.assigneeUid) {
+              const who = document.createElement("span");
+              who.className = "due";
+              who.textContent = assigneeName(item.assigneeUid);
+              li.appendChild(who);
+            }
+            mealMenuListEl.appendChild(li);
+          });
+        }
+      } else {
+        mealMenuSection.style.display = "none";
+        mealPlacesSection.style.display = "block";
+        mealOptionsListEl.innerHTML = "";
+        if (meal.status === "decided") {
+          const p = document.createElement("p");
+          p.textContent = `Выбранное место: ${meal.decidedPlace}`;
+          mealOptionsListEl.appendChild(p);
+        } else {
+          meal.placeOptions.forEach((placeName) => {
+            renderVoteOption(mealOptionsListEl, meal, placeName, placeName, () =>
+              decideMealPlace(meal.id, placeName)
+            );
+          });
+        }
+      }
+    }
+
+    async function decideMealPlace(planId, placeName) {
+      const confirmed = await confirmAction(`Выбрать место «${placeName}»?`);
+      if (!confirmed) return;
+      await updateDoc(doc(db, "plans", planId), { status: "decided", decidedPlace: placeName });
+      haptic("success");
+    }
+
+    mealMenuAddBtn.addEventListener("click", async () => {
+      const text = mealMenuTextInput.value.trim();
+      if (!text || !activeMealId) {
+        haptic("error");
+        return;
+      }
+      await addDoc(collection(db, "plan_menu_items"), {
+        planId: activeMealId,
+        text,
+        assigneeUid: mealMenuAssigneeSelect.value || null,
+        status: "pending",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+      mealMenuTextInput.value = "";
+      mealMenuAssigneeSelect.value = "";
+      haptic("success");
+    });
+
+    mealEditBtn.addEventListener("click", () => {
+      const meal = allMeals.find((m) => m.id === activeMealId);
+      if (!meal) return;
+      mealEditTitleInput.value = meal.title || "";
+      mealEditDateInput.value = meal.mealDate;
+      mealEditTimeInput.value = meal.mealTime || "";
+      mealEditForm.style.display = "flex";
+    });
+
+    mealEditCancelBtn.addEventListener("click", () => {
+      mealEditForm.style.display = "none";
+    });
+
+    mealEditSaveBtn.addEventListener("click", async () => {
+      const mealDate = mealEditDateInput.value;
+      if (!mealDate) {
+        haptic("error");
+        return;
+      }
+      await updateDoc(doc(db, "plans", activeMealId), {
+        title: mealEditTitleInput.value.trim() || null,
+        mealDate,
+        mealTime: mealEditTimeInput.value || null,
+      });
+      mealEditForm.style.display = "none";
+      haptic("success");
+    });
+
+    mealDeleteBtn.addEventListener("click", async () => {
+      const confirmed = await confirmAction("Удалить этот приём пищи вместе с меню? Это необратимо.");
+      if (!confirmed) return;
+      const batch = writeBatch(db);
+      allMenuItems
+        .filter((i) => i.planId === activeMealId)
+        .forEach((i) => batch.delete(doc(db, "plan_menu_items", i.id)));
+      batch.delete(doc(db, "plans", activeMealId));
+      await batch.commit();
+      haptic("success");
+      closeMealDetail();
+    });
+
+    async function createMeal() {
+      const mealDate = mealDateInput.value;
+      const mealType = mealTypeSelect.value;
+      if (!mealDate) {
+        haptic("error");
+        mealDateInput.focus();
+        return;
+      }
+      if (mealType !== "home" && newMealPlaceOptions.length === 0) {
+        haptic("error");
+        mealPlaceOptionInput.focus();
+        return;
+      }
+
+      await addDoc(collection(db, "plans"), {
+        type: "meal",
+        title: mealTitleInput.value.trim() || null,
+        mealDate,
+        mealTime: mealTimeInput.value || null,
+        mealType,
+        placeOptions: mealType === "home" ? [] : newMealPlaceOptions.slice(),
+        reactions: {},
+        decidedPlace: null,
+        status: mealType === "home" ? "decided" : "planned",
+        telegramChatId: null,
+        telegramMessageThreadId: null,
+        telegramTopicLink: null,
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      mealTitleInput.value = "";
+      mealDateInput.value = "";
+      mealTimeInput.value = "";
+      mealTypeSelect.value = "home";
+      mealPlaceOptionRow.style.display = "none";
+      newMealPlaceOptions = [];
+      renderMealPlaceChips();
+      haptic("success");
+    }
+
+    function startPlansListeners() {
+      onSnapshot(collection(db, "plans"), (snapshot) => {
+        const all = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        allTrips = all.filter((p) => p.type === "trip");
+        allLeisure = all.filter((p) => p.type === "leisure");
+        allMeals = all.filter((p) => p.type === "meal");
+        renderTrips();
+        if (activeTripId) renderTripDetail();
+        renderLeisure();
+        if (activeLeisureId) renderLeisureDetail();
+        renderMeals();
+        if (activeMealId) renderMealDetail();
+        updateHomeStats();
+      });
+      onSnapshot(collection(db, "plan_checklist_items"), (snapshot) => {
+        allChecklistItems = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (activeTripId) renderTripDetail();
+      });
+      onSnapshot(collection(db, "plan_menu_items"), (snapshot) => {
+        allMenuItems = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (activeMealId) renderMealDetail();
+      });
+    }
+
     // ---- Вход ----
     async function signIn() {
       if (!tg.initData) {
@@ -1791,6 +2975,7 @@
         startShoppingListener();
         startEventsListener();
         startBudgetListeners();
+        startPlansListeners();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;
       }
