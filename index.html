@@ -819,9 +819,10 @@
       const today = localDateStr(new Date());
       const tomorrow = localDateStr(new Date(Date.now() + 86400000));
 
-      const dueToday = cachedTasks.filter((t) => t.dueDate === today).length;
+      const myTasks = cachedTasks.filter((t) => t.assigneeUid === auth.currentUser.uid);
+      const dueToday = myTasks.filter((t) => t.dueDate === today).length;
       homeStatTasksEl.textContent =
-        dueToday > 0 ? `${dueToday} сегодня` : cachedTasks.length > 0 ? `${cachedTasks.length} активных` : "всё сделано";
+        dueToday > 0 ? `${dueToday} сегодня` : myTasks.length > 0 ? `${myTasks.length} активных` : "всё сделано";
 
       homeStatShoppingEl.textContent =
         cachedShopping.length > 0 ? `${cachedShopping.length} в списке` : "список пуст";
