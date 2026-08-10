@@ -189,3 +189,54 @@ exports.sendEventReminders = onSchedule(
     }
   }
 );
+
+const RECURRING_REMINDER_DAYS_BEFORE = 3;
+const CURRENCY_SYMBOLS = { RUB: "₽", USD: "$", EUR: "€", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴" };
+
+function dayAndMonthKeyInTimeZone(timeZone) {
+  const iso = isoDateInTimeZone(timeZone, 0); // "YYYY-MM-DD"
+  const [year, month, day] = iso.split("-").map(Number);
+  return { day, monthKey: `${year}-${String(month).padStart(2, "0")}` };
+}
+
+exports.sendRecurringPaymentReminders = onSchedule(
+  { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
+  async () => {
+    const db = getFirestore();
+    const { day, monthKey } = dayAndMonthKeyInTimeZone(REMINDER_TIMEZONE);
+
+    const [paymentsSnap, usersSnap, settingsSnap] = await Promise.all([
+      db.collection("recurring_payments").where("status", "==", "active").get(),
+      db.collection("users").get(),
+      db.collection("settings").doc("budget").get(),
+    ]);
+    const chatIds = usersSnap.docs.map((d) => d.id);
+    const currency = settingsSnap.exists() ? settingsSnap.data().currency || "RUB" : "RUB";
+    const symbol = CURRENCY_SYMBOLS[currency] || currency;
+
+    for (const paymentDoc of paymentsSnap.docs) {
+      const payment = paymentDoc.data();
+      const reminderDay = payment.dueDay - RECURRING_REMINDER_DAYS_BEFORE;
+      const updates = {};
+      let messageText = null;
+
+      if (reminderDay >= 1 && day === reminderDay && payment.remindedMonth3Day !== monthKey) {
+        messageText =
+          `Через ${RECURRING_REMINDER_DAYS_BEFORE} дня платёж «${payment.title}» — ` +
+          `${payment.amount.toLocaleString("ru-RU")} ${symbol}`;
+        updates.remindedMonth3Day = monthKey;
+      } else if (day === payment.dueDay && payment.remindedMonthDueDay !== monthKey) {
+        messageText =
+          `Сегодня платёж «${payment.title}» — ${payment.amount.toLocaleString("ru-RU")} ${symbol}`;
+        updates.remindedMonthDueDay = monthKey;
+      }
+
+      if (messageText) {
+        await Promise.all(
+          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
+        );
+        await paymentDoc.ref.update(updates);
+      }
+    }
+  }
+);

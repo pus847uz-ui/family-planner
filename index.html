@@ -244,6 +244,63 @@
       padding: 4px 2px;
       min-height: 18px;
     }
+    .budget-settings {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: var(--tg-theme-hint-color, #999999);
+    }
+    .budget-settings select {
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--tg-theme-hint-color, #cccccc);
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    .period-toggle { display: flex; gap: 8px; margin: 0 0 16px; }
+    .period-toggle .period-btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      color: var(--tg-theme-text-color, #111111);
+      font-size: 14px;
+    }
+    .period-toggle .period-btn.active {
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+    .project-card { flex-direction: column; align-items: stretch; gap: 6px; cursor: pointer; }
+    .project-card-header { display: flex; justify-content: space-between; gap: 8px; }
+    .progress-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: rgba(127, 127, 127, 0.2);
+      overflow: hidden;
+    }
+    .progress-fill { height: 100%; background: var(--tg-theme-button-color, #2481cc); }
+    .progress-fill.over-limit { background: var(--tg-theme-destructive-text-color, #e53935); }
+    #project-detail-summary {
+      font-size: 15px;
+      margin: 4px 0 16px;
+      color: var(--tg-theme-hint-color, #999999);
+    }
+    .entry-buttons { display: flex; gap: 8px; }
+    .entry-btn {
+      flex: 1;
+      border: none;
+      border-radius: 10px;
+      padding: 12px;
+      font-size: 15px;
+      color: #ffffff;
+    }
+    .entry-btn.income { background: #2e7d32; }
+    .entry-btn.expense { background: var(--tg-theme-destructive-text-color, #e53935); }
+    .entry-amount.income { color: #2e7d32; }
+    .entry-amount.expense { color: var(--tg-theme-destructive-text-color, #e53935); }
     .map-confirm-btn {
       flex-shrink: 0;
       border: none;
@@ -311,6 +368,59 @@
       <div id="agenda-title"></div>
       <ul id="events-list" class="list"></ul>
     </section>
+
+    <section id="page-budget" class="page">
+      <div class="budget-settings">
+        <label>Валюта</label>
+        <select id="budget-currency"></select>
+      </div>
+
+      <div class="period-toggle" id="budget-subnav">
+        <button type="button" class="period-btn active" data-budget-sub="projects">Проекты</button>
+        <button type="button" class="period-btn" data-budget-sub="recurring">Платежи</button>
+      </div>
+
+      <div id="budget-projects-view">
+        <div class="event-form">
+          <input id="project-title" type="text" placeholder="Название проекта (например, «Ремонт кухни»)">
+          <input id="project-limit" type="number" step="0.01" min="0" placeholder="Ориентировочный лимит">
+        </div>
+
+        <div class="period-toggle" id="budget-archive-filter">
+          <button type="button" class="period-btn active" data-archive="active">Активные</button>
+          <button type="button" class="period-btn" data-archive="archived">Архив</button>
+        </div>
+
+        <ul id="projects-list" class="list"></ul>
+      </div>
+
+      <div id="budget-project-detail-view" style="display: none;">
+        <h2 id="project-detail-title"></h2>
+        <div id="project-detail-summary"></div>
+
+        <div class="event-form">
+          <input id="entry-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+          <input id="entry-comment" type="text" placeholder="Комментарий / #хэштег (необязательно)">
+          <div class="entry-buttons">
+            <button type="button" id="entry-income-btn" class="entry-btn income">+ Доход</button>
+            <button type="button" id="entry-expense-btn" class="entry-btn expense">− Расход</button>
+          </div>
+        </div>
+
+        <button type="button" id="project-archive-btn" class="text-btn">Архивировать проект</button>
+
+        <ul id="entries-list" class="list"></ul>
+      </div>
+
+      <div id="budget-recurring-view" style="display: none;">
+        <div class="event-form">
+          <input id="recurring-title" type="text" placeholder="Название платежа (например, «Ипотека»)">
+          <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+          <input id="recurring-day" type="number" min="1" max="31" placeholder="День месяца (1–31)">
+        </div>
+        <ul id="recurring-list" class="list"></ul>
+      </div>
+    </section>
   </div>
 
   <nav class="tabbar" id="tabbar" style="display: none;">
@@ -322,6 +432,9 @@
     </button>
     <button class="tab" data-page="calendar">
       <span class="icon">📅</span><span>Календарь</span>
+    </button>
+    <button class="tab" data-page="budget">
+      <span class="icon">💰</span><span>Бюджет</span>
     </button>
   </nav>
 
@@ -343,7 +456,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
-      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc,
+      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, setDoc,
       query, where, orderBy, onSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -393,6 +506,26 @@
     const calPrevBtn = document.getElementById("cal-prev");
     const calNextBtn = document.getElementById("cal-next");
 
+    const budgetCurrencySelect = document.getElementById("budget-currency");
+    const budgetProjectsViewEl = document.getElementById("budget-projects-view");
+    const budgetProjectDetailViewEl = document.getElementById("budget-project-detail-view");
+    const budgetRecurringViewEl = document.getElementById("budget-recurring-view");
+    const projectTitleInput = document.getElementById("project-title");
+    const projectLimitInput = document.getElementById("project-limit");
+    const projectsListEl = document.getElementById("projects-list");
+    const projectDetailTitleEl = document.getElementById("project-detail-title");
+    const projectDetailSummaryEl = document.getElementById("project-detail-summary");
+    const entryAmountInput = document.getElementById("entry-amount");
+    const entryCommentInput = document.getElementById("entry-comment");
+    const entryIncomeBtn = document.getElementById("entry-income-btn");
+    const entryExpenseBtn = document.getElementById("entry-expense-btn");
+    const projectArchiveBtn = document.getElementById("project-archive-btn");
+    const entriesListEl = document.getElementById("entries-list");
+    const recurringTitleInput = document.getElementById("recurring-title");
+    const recurringAmountInput = document.getElementById("recurring-amount");
+    const recurringDayInput = document.getElementById("recurring-day");
+    const recurringListEl = document.getElementById("recurring-list");
+
     const tg = window.Telegram.WebApp;
     tg.ready();
     tg.expand();
@@ -407,11 +540,15 @@
       tasks: { mainButtonText: "Добавить задачу", add: addTask },
       shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
       calendar: { mainButtonText: "Добавить событие", add: saveEvent },
+      budget: { mainButtonText: "Создать проект", add: createProject },
     };
 
     function switchPage(pageId) {
       if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
         resetEventForm();
+      }
+      if (currentPage === "budget" && pageId !== "budget" && activeProjectId) {
+        closeProjectDetail();
       }
       currentPage = pageId;
       document.querySelectorAll(".page").forEach((el) => {
@@ -916,6 +1053,7 @@
     eventCancelBtn.addEventListener("click", resetEventForm);
     tg.BackButton.onClick(() => {
       if (editingEventId) resetEventForm();
+      else if (activeProjectId) closeProjectDetail();
     });
 
     eventDeleteBtn.addEventListener("click", async () => {
@@ -966,6 +1104,308 @@
       haptic("success");
     }
 
+    // ---- Бюджет ----
+    const CURRENCIES = { RUB: "₽", USD: "$", EUR: "€", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴" };
+    let currentCurrency = "RUB";
+    let allProjects = [];
+    let allEntries = [];
+    let allRecurring = [];
+    let currentArchiveFilter = "active";
+    let activeProjectId = null;
+
+    Object.entries(CURRENCIES).forEach(([code, symbol]) => {
+      const opt = document.createElement("option");
+      opt.value = code;
+      opt.textContent = `${code} (${symbol})`;
+      budgetCurrencySelect.appendChild(opt);
+    });
+
+    function formatAmount(n) {
+      return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currentCurrency] || currentCurrency}`;
+    }
+
+    function projectStats(projectId) {
+      const entries = allEntries.filter((e) => e.projectId === projectId);
+      const totalExpense = entries.filter((e) => e.type === "expense").reduce((s, e) => s + e.amount, 0);
+      const totalIncome = entries.filter((e) => e.type === "income").reduce((s, e) => s + e.amount, 0);
+      return { entries, netSpent: totalExpense - totalIncome };
+    }
+
+    function renderProjects() {
+      const filtered = allProjects
+        .filter((p) => p.status === currentArchiveFilter)
+        .slice()
+        .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+
+      projectsListEl.innerHTML = "";
+      if (filtered.length === 0) {
+        projectsListEl.innerHTML =
+          '<li class="empty" style="background:none;">' +
+          (currentArchiveFilter === "active" ? "Нет активных проектов" : "Архив пуст") +
+          "</li>";
+        return;
+      }
+
+      filtered.forEach((project) => {
+        const { netSpent } = projectStats(project.id);
+        const li = document.createElement("li");
+        li.className = "project-card";
+
+        const header = document.createElement("div");
+        header.className = "project-card-header";
+        const title = document.createElement("span");
+        title.className = "text";
+        title.textContent = project.title;
+        const amounts = document.createElement("span");
+        amounts.className = "due";
+        amounts.textContent = `${formatAmount(netSpent)} / ${formatAmount(project.limit)}`;
+        header.appendChild(title);
+        header.appendChild(amounts);
+
+        const bar = document.createElement("div");
+        bar.className = "progress-bar";
+        const fill = document.createElement("div");
+        fill.className = "progress-fill" + (netSpent > project.limit ? " over-limit" : "");
+        fill.style.width = Math.min(100, Math.max(0, (netSpent / project.limit) * 100)) + "%";
+        bar.appendChild(fill);
+
+        li.appendChild(header);
+        li.appendChild(bar);
+        li.addEventListener("click", () => openProjectDetail(project.id));
+        projectsListEl.appendChild(li);
+      });
+    }
+
+    function openProjectDetail(projectId) {
+      activeProjectId = projectId;
+      budgetProjectsViewEl.style.display = "none";
+      budgetRecurringViewEl.style.display = "none";
+      budgetProjectDetailViewEl.style.display = "block";
+      tg.MainButton.hide();
+      tg.BackButton.show();
+      renderProjectDetail();
+    }
+
+    function closeProjectDetail() {
+      activeProjectId = null;
+      budgetProjectDetailViewEl.style.display = "none";
+      budgetProjectsViewEl.style.display = "block";
+      tg.BackButton.hide();
+      if (currentPage === "budget") {
+        tg.MainButton.setText(pages.budget.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    function renderProjectDetail() {
+      const project = allProjects.find((p) => p.id === activeProjectId);
+      if (!project) {
+        closeProjectDetail();
+        return;
+      }
+
+      projectDetailTitleEl.textContent = project.title;
+      const { entries, netSpent } = projectStats(project.id);
+      const remaining = project.limit - netSpent;
+      projectDetailSummaryEl.textContent =
+        `Потрачено: ${formatAmount(netSpent)} из ${formatAmount(project.limit)}` +
+        (remaining >= 0
+          ? ` (осталось ${formatAmount(remaining)})`
+          : ` (превышение ${formatAmount(-remaining)})`);
+
+      entriesListEl.innerHTML = "";
+      if (entries.length === 0) {
+        entriesListEl.innerHTML = '<li class="empty" style="background:none;">Записей ещё нет</li>';
+      } else {
+        entries
+          .slice()
+          .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
+          .forEach((entry) => {
+            const li = document.createElement("li");
+            const sign = entry.type === "income" ? "+" : "−";
+            const amount = document.createElement("span");
+            amount.className = "text entry-amount " + entry.type;
+            amount.textContent = `${sign} ${formatAmount(entry.amount)}`;
+            li.appendChild(amount);
+            if (entry.comment) {
+              const comment = document.createElement("span");
+              comment.className = "due";
+              comment.textContent = entry.comment;
+              li.appendChild(comment);
+            }
+            entriesListEl.appendChild(li);
+          });
+      }
+
+      projectArchiveBtn.textContent =
+        project.status === "archived" ? "Вернуть из архива" : "Архивировать проект";
+    }
+
+    async function createProject() {
+      const title = projectTitleInput.value.trim();
+      const limit = Number(projectLimitInput.value);
+      if (!title || !limit || limit <= 0) {
+        haptic("error");
+        (title ? projectLimitInput : projectTitleInput).focus();
+        return;
+      }
+
+      await addDoc(collection(db, "budget_projects"), {
+        title,
+        limit,
+        status: "active",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      projectTitleInput.value = "";
+      projectLimitInput.value = "";
+      haptic("success");
+    }
+
+    async function addEntry(type) {
+      const amount = Number(entryAmountInput.value);
+      if (!amount || amount <= 0) {
+        haptic("error");
+        entryAmountInput.focus();
+        return;
+      }
+
+      await addDoc(collection(db, "budget_entries"), {
+        projectId: activeProjectId,
+        amount,
+        type,
+        comment: entryCommentInput.value.trim() || null,
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      entryAmountInput.value = "";
+      entryCommentInput.value = "";
+      haptic("success");
+    }
+
+    entryIncomeBtn.addEventListener("click", () => addEntry("income"));
+    entryExpenseBtn.addEventListener("click", () => addEntry("expense"));
+
+    projectArchiveBtn.addEventListener("click", async () => {
+      const project = allProjects.find((p) => p.id === activeProjectId);
+      if (!project) return;
+      const newStatus = project.status === "archived" ? "active" : "archived";
+      await updateDoc(doc(db, "budget_projects", activeProjectId), { status: newStatus });
+      haptic("success");
+      closeProjectDetail();
+    });
+
+    function showBudgetSubview(sub) {
+      document.querySelectorAll("#budget-subnav .period-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.budgetSub === sub);
+      });
+      if (sub === "projects") {
+        budgetProjectsViewEl.style.display = "block";
+        budgetRecurringViewEl.style.display = "none";
+        pages.budget = { mainButtonText: "Создать проект", add: createProject };
+      } else {
+        budgetProjectsViewEl.style.display = "none";
+        budgetRecurringViewEl.style.display = "block";
+        pages.budget = { mainButtonText: "Добавить платёж", add: addRecurringPayment };
+      }
+      if (currentPage === "budget" && !activeProjectId) {
+        tg.MainButton.setText(pages.budget.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    document.querySelectorAll("#budget-subnav .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => showBudgetSubview(btn.dataset.budgetSub));
+    });
+
+    document.querySelectorAll("#budget-archive-filter .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentArchiveFilter = btn.dataset.archive;
+        document.querySelectorAll("#budget-archive-filter .period-btn").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        renderProjects();
+      });
+    });
+
+    function renderRecurring() {
+      recurringListEl.innerHTML = "";
+      if (allRecurring.length === 0) {
+        recurringListEl.innerHTML = '<li class="empty" style="background:none;">Регулярных платежей нет</li>';
+        return;
+      }
+      allRecurring
+        .slice()
+        .sort((a, b) => a.dueDay - b.dueDay)
+        .forEach((payment) => {
+          const li = document.createElement("li");
+          const text = document.createElement("span");
+          text.className = "text";
+          text.textContent = payment.title;
+          const due = document.createElement("span");
+          due.className = "due";
+          due.textContent = `${formatAmount(payment.amount)} · ${payment.dueDay} числа`;
+          li.appendChild(text);
+          li.appendChild(due);
+          recurringListEl.appendChild(li);
+        });
+    }
+
+    async function addRecurringPayment() {
+      const title = recurringTitleInput.value.trim();
+      const amount = Number(recurringAmountInput.value);
+      const dueDay = Number(recurringDayInput.value);
+      if (!title || !amount || amount <= 0 || !dueDay || dueDay < 1 || dueDay > 31) {
+        haptic("error");
+        return;
+      }
+
+      await addDoc(collection(db, "recurring_payments"), {
+        title,
+        amount,
+        dueDay,
+        status: "active",
+        authorUid: auth.currentUser.uid,
+        createdAt: serverTimestamp(),
+      });
+
+      recurringTitleInput.value = "";
+      recurringAmountInput.value = "";
+      recurringDayInput.value = "";
+      haptic("success");
+    }
+
+    budgetCurrencySelect.addEventListener("change", async () => {
+      currentCurrency = budgetCurrencySelect.value;
+      await setDoc(doc(db, "settings", "budget"), { currency: currentCurrency }, { merge: true });
+    });
+
+    function startBudgetListeners() {
+      onSnapshot(collection(db, "budget_projects"), (snapshot) => {
+        allProjects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderProjects();
+        if (activeProjectId) renderProjectDetail();
+      });
+      onSnapshot(collection(db, "budget_entries"), (snapshot) => {
+        allEntries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderProjects();
+        if (activeProjectId) renderProjectDetail();
+      });
+      onSnapshot(collection(db, "recurring_payments"), (snapshot) => {
+        allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderRecurring();
+      });
+      onSnapshot(doc(db, "settings", "budget"), (snapshot) => {
+        currentCurrency = snapshot.exists() ? snapshot.data().currency || "RUB" : "RUB";
+        budgetCurrencySelect.value = currentCurrency;
+        renderProjects();
+        if (activeProjectId) renderProjectDetail();
+        renderRecurring();
+      });
+    }
+
     // ---- Вход ----
     async function signIn() {
       if (!tg.initData) {
@@ -1005,6 +1445,7 @@
         startTasksListener();
         startShoppingListener();
         startEventsListener();
+        startBudgetListeners();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;
       }
