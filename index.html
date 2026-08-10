@@ -1114,7 +1114,7 @@
     populateCurrencySelect(recurringCurrencySelect);
 
     function formatAmount(n, currency) {
-      return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currency] || currency}`;
+      return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currency] || currency || ""}`.trim();
     }
 
     function projectStats(projectId) {
