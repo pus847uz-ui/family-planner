@@ -347,6 +347,13 @@
       <div class="quick-add">
         <input id="shopping-text" type="text" placeholder="Что купить?">
       </div>
+      <select id="shopping-assignee" style="width: 100%; margin-bottom: 12px;">
+        <option value="">Не назначено</option>
+      </select>
+      <div class="form-actions" id="shopping-form-actions" style="display: none;">
+        <button type="button" id="shopping-delete-btn" class="text-btn danger">Удалить позицию</button>
+        <button type="button" id="shopping-cancel-btn" class="text-btn">Отмена</button>
+      </div>
       <ul id="shopping-list" class="list"></ul>
     </section>
 
@@ -517,6 +524,10 @@
     const taskDeleteBtn = document.getElementById("task-delete-btn");
     const taskCancelBtn = document.getElementById("task-cancel-btn");
     const shoppingTextInput = document.getElementById("shopping-text");
+    const shoppingAssigneeSelect = document.getElementById("shopping-assignee");
+    const shoppingFormActions = document.getElementById("shopping-form-actions");
+    const shoppingDeleteBtn = document.getElementById("shopping-delete-btn");
+    const shoppingCancelBtn = document.getElementById("shopping-cancel-btn");
     const eventsList = document.getElementById("events-list");
     const eventTitleInput = document.getElementById("event-title");
     const eventStartDateInput = document.getElementById("event-start-date");
@@ -585,7 +596,7 @@
 
     const pages = {
       tasks: { mainButtonText: "Добавить задачу", add: saveTask },
-      shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
+      shopping: { mainButtonText: "Добавить покупку", add: saveShoppingItem },
       calendar: { mainButtonText: "Добавить событие", add: saveEvent },
       budget: { mainButtonText: "Создать проект", add: createProject },
     };
@@ -593,6 +604,9 @@
     function navigateTo(pageId) {
       if (currentPage === "tasks" && pageId !== "tasks" && editingTaskId) {
         resetTaskForm();
+      }
+      if (currentPage === "shopping" && pageId !== "shopping" && editingShoppingId) {
+        resetShoppingForm();
       }
       if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
         resetEventForm();
@@ -855,18 +869,23 @@
     let allFamilyUsers = [];
     let editingTaskId = null;
 
+    function populateAssigneeSelect(selectEl) {
+      const currentValue = selectEl.value;
+      selectEl.innerHTML = '<option value="">Не назначено</option>';
+      allFamilyUsers.forEach((u) => {
+        const opt = document.createElement("option");
+        opt.value = u.id;
+        opt.textContent = u.name || u.id;
+        selectEl.appendChild(opt);
+      });
+      selectEl.value = currentValue;
+    }
+
     function startUsersListener() {
       onSnapshot(collection(db, "users"), (snapshot) => {
         allFamilyUsers = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        const currentValue = taskAssigneeSelect.value;
-        taskAssigneeSelect.innerHTML = '<option value="">Не назначено</option>';
-        allFamilyUsers.forEach((u) => {
-          const opt = document.createElement("option");
-          opt.value = u.id;
-          opt.textContent = u.name || u.id;
-          taskAssigneeSelect.appendChild(opt);
-        });
-        taskAssigneeSelect.value = currentValue;
+        populateAssigneeSelect(taskAssigneeSelect);
+        populateAssigneeSelect(shoppingAssigneeSelect);
       });
     }
 
@@ -993,8 +1012,10 @@
     }
 
     // ---- Покупки ----
+    let editingShoppingId = null;
+
     function renderShopping(snapshot) {
-      cachedShopping = snapshot.docs.map((d) => d.data());
+      cachedShopping = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       updateHomeStats();
 
       shoppingList.innerHTML = "";
@@ -1002,15 +1023,16 @@
         shoppingList.innerHTML = '<li class="empty" style="background:none;">Список пуст</li>';
         return;
       }
-      snapshot.forEach((docSnap) => {
-        const item = docSnap.data();
+      cachedShopping.forEach((item) => {
         const li = document.createElement("li");
+        li.className = "event-row";
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
+        checkbox.addEventListener("click", (e) => e.stopPropagation());
         checkbox.addEventListener("change", async () => {
           haptic();
-          await updateDoc(doc(db, "shopping_items", docSnap.id), {
+          await updateDoc(doc(db, "shopping_items", item.id), {
             status: "bought",
             boughtAt: serverTimestamp(),
           });
@@ -1022,6 +1044,15 @@
 
         li.appendChild(checkbox);
         li.appendChild(text);
+
+        if (item.assigneeUid) {
+          const who = document.createElement("span");
+          who.className = "due";
+          who.textContent = assigneeName(item.assigneeUid);
+          li.appendChild(who);
+        }
+
+        li.addEventListener("click", () => startEditShoppingItem(item));
         shoppingList.appendChild(li);
       });
     }
@@ -1037,7 +1068,38 @@
       });
     }
 
-    async function addShoppingItem() {
+    function startEditShoppingItem(item) {
+      editingShoppingId = item.id;
+      shoppingTextInput.value = item.text;
+      shoppingAssigneeSelect.value = item.assigneeUid || "";
+      shoppingFormActions.style.display = "flex";
+      tg.MainButton.setText("Сохранить позицию");
+      tg.BackButton.show();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetShoppingForm() {
+      editingShoppingId = null;
+      shoppingTextInput.value = "";
+      shoppingAssigneeSelect.value = "";
+      shoppingFormActions.style.display = "none";
+      if (currentPage === "shopping") {
+        tg.MainButton.setText(pages.shopping.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    shoppingCancelBtn.addEventListener("click", resetShoppingForm);
+    shoppingDeleteBtn.addEventListener("click", async () => {
+      if (!editingShoppingId) return;
+      const confirmed = await confirmAction("Удалить эту позицию из списка покупок?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "shopping_items", editingShoppingId));
+      resetShoppingForm();
+      haptic("success");
+    });
+
+    async function saveShoppingItem() {
       const text = shoppingTextInput.value.trim();
       if (!text) {
         haptic("error");
@@ -1045,15 +1107,21 @@
         return;
       }
 
-      await addDoc(collection(db, "shopping_items"), {
-        text,
-        status: "active",
-        authorUid: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-        boughtAt: null,
-      });
+      const data = { text, assigneeUid: shoppingAssigneeSelect.value || null };
 
-      shoppingTextInput.value = "";
+      if (editingShoppingId) {
+        await updateDoc(doc(db, "shopping_items", editingShoppingId), data);
+      } else {
+        await addDoc(collection(db, "shopping_items"), {
+          ...data,
+          status: "active",
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+          boughtAt: null,
+        });
+      }
+
+      resetShoppingForm();
       haptic("success");
     }
 
@@ -1237,6 +1305,7 @@
     eventCancelBtn.addEventListener("click", resetEventForm);
     tg.BackButton.onClick(() => {
       if (editingTaskId) resetTaskForm();
+      else if (editingShoppingId) resetShoppingForm();
       else if (editingEventId) resetEventForm();
       else if (editingRecurringId) resetRecurringForm();
       else if (activeProjectId) closeProjectDetail();
