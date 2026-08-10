@@ -534,6 +534,34 @@
       haptic("success");
     });
 
+    function openLocationChoice(url) {
+      const match = url.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (!match) {
+        // ссылка вставлена вручную не в нашем формате — просто открываем как есть
+        tg.openLink(url);
+        return;
+      }
+      const [, lat, lng] = match;
+      const googleUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+      const yandexUrl = `https://yandex.ru/maps/?pt=${lng},${lat}&z=16&l=map`;
+
+      tg.showPopup(
+        {
+          title: "Открыть карту",
+          message: "В каком приложении открыть место?",
+          buttons: [
+            { id: "google", type: "default", text: "Google Maps" },
+            { id: "yandex", type: "default", text: "Яндекс.Карты" },
+            { id: "cancel", type: "cancel" },
+          ],
+        },
+        (buttonId) => {
+          if (buttonId === "google") tg.openLink(googleUrl);
+          else if (buttonId === "yandex") tg.openLink(yandexUrl);
+        }
+      );
+    }
+
     // ---- Задачи ----
     function renderTasks(snapshot) {
       tasksList.innerHTML = "";
@@ -783,7 +811,7 @@
           link.addEventListener("click", (e) => {
             e.stopPropagation();
             e.preventDefault();
-            tg.openLink(ev.locationUrl);
+            openLocationChoice(ev.locationUrl);
           });
           li.appendChild(link);
         }
