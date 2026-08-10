@@ -333,6 +333,13 @@
         <input id="task-text" type="text" placeholder="Новая задача">
         <input id="task-due" type="date" title="Срок (необязательно)">
       </div>
+      <select id="task-assignee" style="width: 100%; margin-bottom: 12px;">
+        <option value="">Не назначено</option>
+      </select>
+      <div class="form-actions" id="task-form-actions" style="display: none;">
+        <button type="button" id="task-delete-btn" class="text-btn danger">Удалить задачу</button>
+        <button type="button" id="task-cancel-btn" class="text-btn">Отмена</button>
+      </div>
       <ul id="tasks-list" class="list"></ul>
     </section>
 
@@ -505,6 +512,10 @@
     const shoppingList = document.getElementById("shopping-list");
     const taskTextInput = document.getElementById("task-text");
     const taskDueInput = document.getElementById("task-due");
+    const taskAssigneeSelect = document.getElementById("task-assignee");
+    const taskFormActions = document.getElementById("task-form-actions");
+    const taskDeleteBtn = document.getElementById("task-delete-btn");
+    const taskCancelBtn = document.getElementById("task-cancel-btn");
     const shoppingTextInput = document.getElementById("shopping-text");
     const eventsList = document.getElementById("events-list");
     const eventTitleInput = document.getElementById("event-title");
@@ -573,13 +584,16 @@
     let currentPage = "home";
 
     const pages = {
-      tasks: { mainButtonText: "Добавить задачу", add: addTask },
+      tasks: { mainButtonText: "Добавить задачу", add: saveTask },
       shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
       calendar: { mainButtonText: "Добавить событие", add: saveEvent },
       budget: { mainButtonText: "Создать проект", add: createProject },
     };
 
     function navigateTo(pageId) {
+      if (currentPage === "tasks" && pageId !== "tasks" && editingTaskId) {
+        resetTaskForm();
+      }
       if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
         resetEventForm();
       }
@@ -837,8 +851,32 @@
     }
 
     // ---- Задачи ----
+    let allFamilyUsers = [];
+    let editingTaskId = null;
+
+    function startUsersListener() {
+      onSnapshot(collection(db, "users"), (snapshot) => {
+        allFamilyUsers = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const currentValue = taskAssigneeSelect.value;
+        taskAssigneeSelect.innerHTML = '<option value="">Не назначено</option>';
+        allFamilyUsers.forEach((u) => {
+          const opt = document.createElement("option");
+          opt.value = u.id;
+          opt.textContent = u.name || u.id;
+          taskAssigneeSelect.appendChild(opt);
+        });
+        taskAssigneeSelect.value = currentValue;
+      });
+    }
+
+    function assigneeName(uid) {
+      if (!uid) return null;
+      const user = allFamilyUsers.find((u) => u.id === uid);
+      return user ? user.name || uid : uid;
+    }
+
     function renderTasks(snapshot) {
-      cachedTasks = snapshot.docs.map((d) => d.data());
+      cachedTasks = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       updateHomeStats();
 
       tasksList.innerHTML = "";
@@ -846,15 +884,16 @@
         tasksList.innerHTML = '<li class="empty" style="background:none;">Пока пусто — добавьте первую задачу</li>';
         return;
       }
-      snapshot.forEach((docSnap) => {
-        const task = docSnap.data();
+      cachedTasks.forEach((task) => {
         const li = document.createElement("li");
+        li.className = "event-row";
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
+        checkbox.addEventListener("click", (e) => e.stopPropagation());
         checkbox.addEventListener("change", async () => {
           haptic();
-          await updateDoc(doc(db, "tasks", docSnap.id), { status: "done" });
+          await updateDoc(doc(db, "tasks", task.id), { status: "done" });
         });
 
         const text = document.createElement("span");
@@ -864,13 +903,17 @@
         li.appendChild(checkbox);
         li.appendChild(text);
 
-        if (task.dueDate) {
+        const meta = [];
+        if (task.dueDate) meta.push(task.dueDate);
+        if (task.assigneeUid) meta.push(assigneeName(task.assigneeUid));
+        if (meta.length > 0) {
           const due = document.createElement("span");
           due.className = "due";
-          due.textContent = task.dueDate;
+          due.textContent = meta.join(" · ");
           li.appendChild(due);
         }
 
+        li.addEventListener("click", () => startEditTask(task));
         tasksList.appendChild(li);
       });
     }
@@ -886,7 +929,40 @@
       });
     }
 
-    async function addTask() {
+    function startEditTask(task) {
+      editingTaskId = task.id;
+      taskTextInput.value = task.text;
+      taskDueInput.value = task.dueDate || "";
+      taskAssigneeSelect.value = task.assigneeUid || "";
+      taskFormActions.style.display = "flex";
+      tg.MainButton.setText("Сохранить задачу");
+      tg.BackButton.show();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetTaskForm() {
+      editingTaskId = null;
+      taskTextInput.value = "";
+      taskDueInput.value = "";
+      taskAssigneeSelect.value = "";
+      taskFormActions.style.display = "none";
+      if (currentPage === "tasks") {
+        tg.MainButton.setText(pages.tasks.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    taskCancelBtn.addEventListener("click", resetTaskForm);
+    taskDeleteBtn.addEventListener("click", async () => {
+      if (!editingTaskId) return;
+      const confirmed = await confirmAction("Удалить эту задачу?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "tasks", editingTaskId));
+      resetTaskForm();
+      haptic("success");
+    });
+
+    async function saveTask() {
       const text = taskTextInput.value.trim();
       if (!text) {
         haptic("error");
@@ -894,16 +970,24 @@
         return;
       }
 
-      await addDoc(collection(db, "tasks"), {
+      const data = {
         text,
         dueDate: taskDueInput.value || null,
-        status: "open",
-        authorUid: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-      });
+        assigneeUid: taskAssigneeSelect.value || null,
+      };
 
-      taskTextInput.value = "";
-      taskDueInput.value = "";
+      if (editingTaskId) {
+        await updateDoc(doc(db, "tasks", editingTaskId), data);
+      } else {
+        await addDoc(collection(db, "tasks"), {
+          ...data,
+          status: "open",
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      resetTaskForm();
       haptic("success");
     }
 
@@ -1151,7 +1235,8 @@
 
     eventCancelBtn.addEventListener("click", resetEventForm);
     tg.BackButton.onClick(() => {
-      if (editingEventId) resetEventForm();
+      if (editingTaskId) resetTaskForm();
+      else if (editingEventId) resetEventForm();
       else if (editingRecurringId) resetRecurringForm();
       else if (activeProjectId) closeProjectDetail();
       else if (currentPage !== "home") goHome();
@@ -1630,6 +1715,7 @@
         tg.MainButton.color = tg.themeParams.button_color || "#2481cc";
         navigateTo("home");
 
+        startUsersListener();
         startTasksListener();
         startShoppingListener();
         startEventsListener();
