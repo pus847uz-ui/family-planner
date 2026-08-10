@@ -11,7 +11,7 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 12px 12px 84px;
+      padding: 12px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: var(--tg-theme-bg-color, #ffffff);
       color: var(--tg-theme-text-color, #111111);
@@ -68,30 +68,23 @@
       color: var(--tg-theme-hint-color, #999999);
       font-size: 15px;
     }
-    .tabbar {
-      position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      display: flex;
-      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
-      border-top: 1px solid rgba(127, 127, 127, 0.25);
-      padding-bottom: env(safe-area-inset-bottom, 0);
-    }
-    .tabbar button {
-      flex: 1;
+    .home-title { font-size: 22px; font-weight: 700; margin: 8px 0 16px; }
+    .home-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .home-tile {
+      aspect-ratio: 1;
       border: none;
-      background: none;
-      padding: 10px 0 8px;
+      border-radius: 18px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 2px;
-      font-size: 11px;
-      color: var(--tg-theme-hint-color, #999999);
+      justify-content: center;
+      gap: 6px;
+      color: var(--tg-theme-text-color, #111111);
     }
-    .tabbar button .icon { font-size: 20px; }
-    .tabbar button.active { color: var(--tg-theme-button-color, #2481cc); }
+    .home-tile-icon { font-size: 34px; }
+    .home-tile-title { font-size: 15px; font-weight: 600; }
+    .home-tile-stat { font-size: 13px; color: var(--tg-theme-hint-color, #999999); }
 
     .event-form {
       display: flex;
@@ -309,7 +302,33 @@
   <div id="status">Проверяем доступ...</div>
 
   <div id="app" style="display: none;">
-    <section id="page-tasks" class="page active">
+    <section id="page-home" class="page active">
+      <div class="home-title">Family Planner</div>
+      <div class="home-grid">
+        <button type="button" class="home-tile" data-target="tasks">
+          <span class="home-tile-icon">📋</span>
+          <span class="home-tile-title">Задачи</span>
+          <span class="home-tile-stat" id="home-stat-tasks"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="shopping">
+          <span class="home-tile-icon">🛒</span>
+          <span class="home-tile-title">Покупки</span>
+          <span class="home-tile-stat" id="home-stat-shopping"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="calendar">
+          <span class="home-tile-icon">📅</span>
+          <span class="home-tile-title">Календарь</span>
+          <span class="home-tile-stat" id="home-stat-calendar"></span>
+        </button>
+        <button type="button" class="home-tile" data-target="budget">
+          <span class="home-tile-icon">💰</span>
+          <span class="home-tile-title">Бюджет</span>
+          <span class="home-tile-stat" id="home-stat-budget"></span>
+        </button>
+      </div>
+    </section>
+
+    <section id="page-tasks" class="page">
       <div class="quick-add">
         <input id="task-text" type="text" placeholder="Новая задача">
         <input id="task-due" type="date" title="Срок (необязательно)">
@@ -440,21 +459,6 @@
     </section>
   </div>
 
-  <nav class="tabbar" id="tabbar" style="display: none;">
-    <button class="tab active" data-page="tasks">
-      <span class="icon">📋</span><span>Задачи</span>
-    </button>
-    <button class="tab" data-page="shopping">
-      <span class="icon">🛒</span><span>Покупки</span>
-    </button>
-    <button class="tab" data-page="calendar">
-      <span class="icon">📅</span><span>Календарь</span>
-    </button>
-    <button class="tab" data-page="budget">
-      <span class="icon">💰</span><span>Бюджет</span>
-    </button>
-  </nav>
-
   <div id="map-modal" class="modal-overlay" style="display: none;">
     <div class="modal-sheet">
       <div class="modal-header">
@@ -493,7 +497,10 @@
 
     const statusEl = document.getElementById("status");
     const appEl = document.getElementById("app");
-    const tabbarEl = document.getElementById("tabbar");
+    const homeStatTasksEl = document.getElementById("home-stat-tasks");
+    const homeStatShoppingEl = document.getElementById("home-stat-shopping");
+    const homeStatCalendarEl = document.getElementById("home-stat-calendar");
+    const homeStatBudgetEl = document.getElementById("home-stat-budget");
     const tasksList = document.getElementById("tasks-list");
     const shoppingList = document.getElementById("shopping-list");
     const taskTextInput = document.getElementById("task-text");
@@ -562,8 +569,8 @@
     const VERIFY_URL =
       "https://us-central1-family-planner-54d84.cloudfunctions.net/verifyInitData";
 
-    // ---- Навигация между «страницами» (табы внизу) ----
-    let currentPage = "tasks";
+    // ---- Навигация: главный экран с плашками ----
+    let currentPage = "home";
 
     const pages = {
       tasks: { mainButtonText: "Добавить задачу", add: addTask },
@@ -572,7 +579,7 @@
       budget: { mainButtonText: "Создать проект", add: createProject },
     };
 
-    function switchPage(pageId) {
+    function navigateTo(pageId) {
       if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
         resetEventForm();
       }
@@ -584,18 +591,28 @@
       document.querySelectorAll(".page").forEach((el) => {
         el.classList.toggle("active", el.id === "page-" + pageId);
       });
-      document.querySelectorAll(".tabbar .tab").forEach((el) => {
-        el.classList.toggle("active", el.dataset.page === pageId);
-      });
-      tg.MainButton.setText(pages[pageId].mainButtonText);
+
+      if (pageId === "home") {
+        tg.MainButton.hide();
+        tg.BackButton.hide();
+        updateHomeStats();
+      } else {
+        tg.MainButton.setText(pages[pageId].mainButtonText);
+        tg.MainButton.show();
+        tg.BackButton.show();
+      }
     }
 
-    document.querySelectorAll(".tabbar .tab").forEach((btn) => {
-      btn.addEventListener("click", () => switchPage(btn.dataset.page));
+    function goHome() {
+      navigateTo("home");
+    }
+
+    document.querySelectorAll(".home-tile").forEach((btn) => {
+      btn.addEventListener("click", () => navigateTo(btn.dataset.target));
     });
 
     tg.MainButton.onClick(() => {
-      pages[currentPage].add();
+      if (currentPage !== "home") pages[currentPage].add();
     });
 
     function haptic(type) {
@@ -780,8 +797,50 @@
       );
     }
 
+    // ---- Главный экран (сводка) ----
+    let cachedTasks = [];
+    let cachedShopping = [];
+
+    function updateHomeStats() {
+      const today = localDateStr(new Date());
+      const tomorrow = localDateStr(new Date(Date.now() + 86400000));
+
+      const dueToday = cachedTasks.filter((t) => t.dueDate === today).length;
+      homeStatTasksEl.textContent =
+        dueToday > 0 ? `${dueToday} сегодня` : cachedTasks.length > 0 ? `${cachedTasks.length} активных` : "всё сделано";
+
+      homeStatShoppingEl.textContent =
+        cachedShopping.length > 0 ? `${cachedShopping.length} в списке` : "список пуст";
+
+      const eventsToday = allEvents.filter(
+        (e) => today >= e.startDate && today <= (e.endDate || e.startDate)
+      ).length;
+      const eventsTomorrow = allEvents.filter(
+        (e) => tomorrow >= e.startDate && tomorrow <= (e.endDate || e.startDate)
+      ).length;
+      homeStatCalendarEl.textContent =
+        eventsToday > 0 ? `${eventsToday} сегодня` : eventsTomorrow > 0 ? `${eventsTomorrow} завтра` : "нет ближайших";
+
+      const activeProjects = allProjects.filter((p) => p.status === "active");
+      if (activeProjects.length === 0) {
+        homeStatBudgetEl.textContent = "нет проектов";
+      } else {
+        let totalLimit = 0;
+        let totalSpent = 0;
+        activeProjects.forEach((p) => {
+          totalLimit += p.limit;
+          totalSpent += projectStats(p.id).netSpent;
+        });
+        const pct = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
+        homeStatBudgetEl.textContent = `${pct}% лимита`;
+      }
+    }
+
     // ---- Задачи ----
     function renderTasks(snapshot) {
+      cachedTasks = snapshot.docs.map((d) => d.data());
+      updateHomeStats();
+
       tasksList.innerHTML = "";
       if (snapshot.empty) {
         tasksList.innerHTML = '<li class="empty" style="background:none;">Пока пусто — добавьте первую задачу</li>';
@@ -850,6 +909,9 @@
 
     // ---- Покупки ----
     function renderShopping(snapshot) {
+      cachedShopping = snapshot.docs.map((d) => d.data());
+      updateHomeStats();
+
       shoppingList.innerHTML = "";
       if (snapshot.empty) {
         shoppingList.innerHTML = '<li class="empty" style="background:none;">Список пуст</li>';
@@ -1044,6 +1106,7 @@
         allEvents = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderCalendarGrid();
         renderAgenda();
+        updateHomeStats();
       }, (err) => {
         statusEl.textContent = "Ошибка загрузки календаря: " + err.message;
       });
@@ -1084,7 +1147,6 @@
       eventLocationInput.value = "";
       eventFormActions.style.display = "none";
       tg.MainButton.setText(pages.calendar.mainButtonText);
-      tg.BackButton.hide();
     }
 
     eventCancelBtn.addEventListener("click", resetEventForm);
@@ -1092,6 +1154,7 @@
       if (editingEventId) resetEventForm();
       else if (editingRecurringId) resetRecurringForm();
       else if (activeProjectId) closeProjectDetail();
+      else if (currentPage !== "home") goHome();
     });
 
     eventDeleteBtn.addEventListener("click", async () => {
@@ -1235,7 +1298,6 @@
       budgetProjectDetailViewEl.style.display = "none";
       budgetProjectsViewEl.style.display = "block";
       projectEditForm.style.display = "none";
-      tg.BackButton.hide();
       if (currentPage === "budget") {
         tg.MainButton.setText(pages.budget.mainButtonText);
         tg.MainButton.show();
@@ -1469,7 +1531,6 @@
       recurringAmountInput.value = "";
       recurringDayInput.value = "";
       recurringFormActions.style.display = "none";
-      tg.BackButton.hide();
       if (currentPage === "budget" && !activeProjectId) {
         tg.MainButton.setText(pages.budget.mainButtonText);
         tg.MainButton.show();
@@ -1521,11 +1582,13 @@
         allProjects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderProjects();
         if (activeProjectId) renderProjectDetail();
+        updateHomeStats();
       });
       onSnapshot(collection(db, "budget_entries"), (snapshot) => {
         allEntries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderProjects();
         if (activeProjectId) renderProjectDetail();
+        updateHomeStats();
       });
       onSnapshot(collection(db, "recurring_payments"), (snapshot) => {
         allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -1564,10 +1627,8 @@
 
         statusEl.style.display = "none";
         appEl.style.display = "block";
-        tabbarEl.style.display = "flex";
-        switchPage("tasks");
         tg.MainButton.color = tg.themeParams.button_color || "#2481cc";
-        tg.MainButton.show();
+        navigateTo("home");
 
         startTasksListener();
         startShoppingListener();
