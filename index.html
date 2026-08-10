@@ -269,6 +269,13 @@
     }
     .progress-fill { height: 100%; background: var(--tg-theme-button-color, #2481cc); }
     .progress-fill.over-limit { background: var(--tg-theme-destructive-text-color, #e53935); }
+    #project-view-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #project-view-header h2 { margin: 0; font-size: 18px; }
     #project-detail-summary {
       font-size: 15px;
       margin: 4px 0 16px;
@@ -379,7 +386,23 @@
       </div>
 
       <div id="budget-project-detail-view" style="display: none;">
-        <h2 id="project-detail-title"></h2>
+        <div id="project-view-header">
+          <h2 id="project-detail-title"></h2>
+          <button type="button" id="project-edit-btn" class="text-btn">✏️ Изменить</button>
+        </div>
+
+        <div id="project-edit-form" class="event-form" style="display: none;">
+          <input id="project-edit-title" type="text" placeholder="Название проекта">
+          <div class="event-form-row">
+            <input id="project-edit-limit" type="number" step="0.01" min="0" placeholder="Лимит">
+            <select id="project-edit-currency"></select>
+          </div>
+          <div class="form-actions">
+            <button type="button" id="project-edit-save-btn" class="text-btn">Сохранить</button>
+            <button type="button" id="project-edit-cancel-btn" class="text-btn">Отмена</button>
+          </div>
+        </div>
+
         <div id="project-detail-summary"></div>
 
         <div class="event-form">
@@ -391,7 +414,10 @@
           </div>
         </div>
 
-        <button type="button" id="project-archive-btn" class="text-btn">Архивировать проект</button>
+        <div class="form-actions">
+          <button type="button" id="project-archive-btn" class="text-btn">Архивировать проект</button>
+          <button type="button" id="project-delete-btn" class="text-btn danger">Удалить проект</button>
+        </div>
 
         <ul id="entries-list" class="list"></ul>
       </div>
@@ -404,6 +430,10 @@
             <select id="recurring-currency"></select>
           </div>
           <input id="recurring-day" type="number" min="1" max="31" placeholder="День месяца (1–31)">
+          <div class="form-actions" id="recurring-form-actions" style="display: none;">
+            <button type="button" id="recurring-delete-btn" class="text-btn danger">Удалить платёж</button>
+            <button type="button" id="recurring-cancel-btn" class="text-btn">Отмена</button>
+          </div>
         </div>
         <ul id="recurring-list" class="list"></ul>
       </div>
@@ -443,7 +473,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
-      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc,
+      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, writeBatch,
       query, where, orderBy, onSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -507,11 +537,22 @@
     const entryIncomeBtn = document.getElementById("entry-income-btn");
     const entryExpenseBtn = document.getElementById("entry-expense-btn");
     const projectArchiveBtn = document.getElementById("project-archive-btn");
+    const projectDeleteBtn = document.getElementById("project-delete-btn");
+    const projectEditBtn = document.getElementById("project-edit-btn");
+    const projectEditForm = document.getElementById("project-edit-form");
+    const projectEditTitleInput = document.getElementById("project-edit-title");
+    const projectEditLimitInput = document.getElementById("project-edit-limit");
+    const projectEditCurrencySelect = document.getElementById("project-edit-currency");
+    const projectEditSaveBtn = document.getElementById("project-edit-save-btn");
+    const projectEditCancelBtn = document.getElementById("project-edit-cancel-btn");
     const entriesListEl = document.getElementById("entries-list");
     const recurringTitleInput = document.getElementById("recurring-title");
     const recurringAmountInput = document.getElementById("recurring-amount");
     const recurringCurrencySelect = document.getElementById("recurring-currency");
     const recurringDayInput = document.getElementById("recurring-day");
+    const recurringFormActions = document.getElementById("recurring-form-actions");
+    const recurringDeleteBtn = document.getElementById("recurring-delete-btn");
+    const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
 
     const tg = window.Telegram.WebApp;
@@ -535,8 +576,9 @@
       if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
         resetEventForm();
       }
-      if (currentPage === "budget" && pageId !== "budget" && activeProjectId) {
-        closeProjectDetail();
+      if (currentPage === "budget" && pageId !== "budget") {
+        if (activeProjectId) closeProjectDetail();
+        if (editingRecurringId) resetRecurringForm();
       }
       currentPage = pageId;
       document.querySelectorAll(".page").forEach((el) => {
@@ -562,6 +604,13 @@
         else if (type === "success") tg.HapticFeedback.notificationOccurred("success");
         else tg.HapticFeedback.impactOccurred("light");
       }
+    }
+
+    function confirmAction(message) {
+      return new Promise((resolve) => {
+        if (tg.showConfirm) tg.showConfirm(message, (confirmed) => resolve(confirmed));
+        else resolve(window.confirm(message));
+      });
     }
 
     // ---- Карта (выбор места для события) ----
@@ -1041,6 +1090,7 @@
     eventCancelBtn.addEventListener("click", resetEventForm);
     tg.BackButton.onClick(() => {
       if (editingEventId) resetEventForm();
+      else if (editingRecurringId) resetRecurringForm();
       else if (activeProjectId) closeProjectDetail();
     });
 
@@ -1184,6 +1234,7 @@
       activeProjectId = null;
       budgetProjectDetailViewEl.style.display = "none";
       budgetProjectsViewEl.style.display = "block";
+      projectEditForm.style.display = "none";
       tg.BackButton.hide();
       if (currentPage === "budget") {
         tg.MainButton.setText(pages.budget.mainButtonText);
@@ -1258,6 +1309,52 @@
       haptic("success");
     }
 
+    populateCurrencySelect(projectEditCurrencySelect);
+
+    projectEditBtn.addEventListener("click", () => {
+      const project = allProjects.find((p) => p.id === activeProjectId);
+      if (!project) return;
+      projectEditTitleInput.value = project.title;
+      projectEditLimitInput.value = project.limit;
+      projectEditCurrencySelect.value = project.currency || "USD";
+      projectEditForm.style.display = "flex";
+    });
+
+    projectEditCancelBtn.addEventListener("click", () => {
+      projectEditForm.style.display = "none";
+    });
+
+    projectEditSaveBtn.addEventListener("click", async () => {
+      const title = projectEditTitleInput.value.trim();
+      const limit = Number(projectEditLimitInput.value);
+      if (!title || !limit || limit <= 0) {
+        haptic("error");
+        return;
+      }
+      await updateDoc(doc(db, "budget_projects", activeProjectId), {
+        title,
+        limit,
+        currency: projectEditCurrencySelect.value,
+      });
+      projectEditForm.style.display = "none";
+      haptic("success");
+    });
+
+    projectDeleteBtn.addEventListener("click", async () => {
+      const confirmed = await confirmAction("Удалить проект вместе со всеми записями? Это необратимо.");
+      if (!confirmed) return;
+
+      const batch = writeBatch(db);
+      allEntries
+        .filter((e) => e.projectId === activeProjectId)
+        .forEach((e) => batch.delete(doc(db, "budget_entries", e.id)));
+      batch.delete(doc(db, "budget_projects", activeProjectId));
+      await batch.commit();
+
+      haptic("success");
+      closeProjectDetail();
+    });
+
     async function addEntry(type) {
       const amount = Number(entryAmountInput.value);
       if (!amount || amount <= 0) {
@@ -1293,6 +1390,7 @@
     });
 
     function showBudgetSubview(sub) {
+      if (sub !== "recurring" && editingRecurringId) resetRecurringForm();
       document.querySelectorAll("#budget-subnav .period-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.budgetSub === sub);
       });
@@ -1325,6 +1423,8 @@
       });
     });
 
+    let editingRecurringId = null;
+
     function renderRecurring() {
       recurringListEl.innerHTML = "";
       if (allRecurring.length === 0) {
@@ -1336,6 +1436,9 @@
         .sort((a, b) => a.dueDay - b.dueDay)
         .forEach((payment) => {
           const li = document.createElement("li");
+          li.className = "event-row";
+          li.addEventListener("click", () => startEditRecurring(payment));
+
           const text = document.createElement("span");
           text.className = "text";
           text.textContent = payment.title;
@@ -1348,6 +1451,41 @@
         });
     }
 
+    function startEditRecurring(payment) {
+      editingRecurringId = payment.id;
+      recurringTitleInput.value = payment.title;
+      recurringAmountInput.value = payment.amount;
+      recurringCurrencySelect.value = payment.currency || "USD";
+      recurringDayInput.value = payment.dueDay;
+      recurringFormActions.style.display = "flex";
+      tg.MainButton.setText("Сохранить платёж");
+      tg.BackButton.show();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetRecurringForm() {
+      editingRecurringId = null;
+      recurringTitleInput.value = "";
+      recurringAmountInput.value = "";
+      recurringDayInput.value = "";
+      recurringFormActions.style.display = "none";
+      tg.BackButton.hide();
+      if (currentPage === "budget" && !activeProjectId) {
+        tg.MainButton.setText(pages.budget.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    recurringCancelBtn.addEventListener("click", resetRecurringForm);
+    recurringDeleteBtn.addEventListener("click", async () => {
+      if (!editingRecurringId) return;
+      const confirmed = await confirmAction("Удалить этот регулярный платёж?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "recurring_payments", editingRecurringId));
+      resetRecurringForm();
+      haptic("success");
+    });
+
     async function addRecurringPayment() {
       const title = recurringTitleInput.value.trim();
       const amount = Number(recurringAmountInput.value);
@@ -1357,19 +1495,24 @@
         return;
       }
 
-      await addDoc(collection(db, "recurring_payments"), {
-        title,
-        amount,
-        currency: recurringCurrencySelect.value,
-        dueDay,
-        status: "active",
-        authorUid: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-      });
+      const data = { title, amount, currency: recurringCurrencySelect.value, dueDay };
 
-      recurringTitleInput.value = "";
-      recurringAmountInput.value = "";
-      recurringDayInput.value = "";
+      if (editingRecurringId) {
+        await updateDoc(doc(db, "recurring_payments", editingRecurringId), {
+          ...data,
+          remindedMonth3Day: null,
+          remindedMonthDueDay: null,
+        });
+      } else {
+        await addDoc(collection(db, "recurring_payments"), {
+          ...data,
+          status: "active",
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      resetRecurringForm();
       haptic("success");
     }
 
