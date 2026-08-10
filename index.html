@@ -31,7 +31,7 @@
     .quick-add input[type="date"], .quick-add input[type="time"] {
       flex: 0 0 auto;
     }
-    input[type="text"], input[type="date"] {
+    input[type="text"], input[type="date"], input[type="number"], input[type="url"], select {
       padding: 12px;
       font-size: 16px;
       border-radius: 10px;
@@ -39,6 +39,7 @@
       background: var(--tg-theme-secondary-bg-color, #f5f5f5);
       color: var(--tg-theme-text-color, #111111);
     }
+    select { flex-shrink: 0; }
     .list { list-style: none; margin: 0; padding: 0; }
     .list li {
       display: flex;
@@ -244,21 +245,6 @@
       padding: 4px 2px;
       min-height: 18px;
     }
-    .budget-settings {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-      font-size: 14px;
-      color: var(--tg-theme-hint-color, #999999);
-    }
-    .budget-settings select {
-      padding: 8px;
-      border-radius: 8px;
-      border: 1px solid var(--tg-theme-hint-color, #cccccc);
-      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
-      color: var(--tg-theme-text-color, #111111);
-    }
     .period-toggle { display: flex; gap: 8px; margin: 0 0 16px; }
     .period-toggle .period-btn {
       flex: 1;
@@ -370,11 +356,6 @@
     </section>
 
     <section id="page-budget" class="page">
-      <div class="budget-settings">
-        <label>Валюта</label>
-        <select id="budget-currency"></select>
-      </div>
-
       <div class="period-toggle" id="budget-subnav">
         <button type="button" class="period-btn active" data-budget-sub="projects">Проекты</button>
         <button type="button" class="period-btn" data-budget-sub="recurring">Платежи</button>
@@ -383,7 +364,10 @@
       <div id="budget-projects-view">
         <div class="event-form">
           <input id="project-title" type="text" placeholder="Название проекта (например, «Ремонт кухни»)">
-          <input id="project-limit" type="number" step="0.01" min="0" placeholder="Ориентировочный лимит">
+          <div class="event-form-row">
+            <input id="project-limit" type="number" step="0.01" min="0" placeholder="Ориентировочный лимит">
+            <select id="project-currency"></select>
+          </div>
         </div>
 
         <div class="period-toggle" id="budget-archive-filter">
@@ -415,7 +399,10 @@
       <div id="budget-recurring-view" style="display: none;">
         <div class="event-form">
           <input id="recurring-title" type="text" placeholder="Название платежа (например, «Ипотека»)">
-          <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+          <div class="event-form-row">
+            <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+            <select id="recurring-currency"></select>
+          </div>
           <input id="recurring-day" type="number" min="1" max="31" placeholder="День месяца (1–31)">
         </div>
         <ul id="recurring-list" class="list"></ul>
@@ -456,7 +443,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
-      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, setDoc,
+      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc,
       query, where, orderBy, onSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -506,12 +493,12 @@
     const calPrevBtn = document.getElementById("cal-prev");
     const calNextBtn = document.getElementById("cal-next");
 
-    const budgetCurrencySelect = document.getElementById("budget-currency");
     const budgetProjectsViewEl = document.getElementById("budget-projects-view");
     const budgetProjectDetailViewEl = document.getElementById("budget-project-detail-view");
     const budgetRecurringViewEl = document.getElementById("budget-recurring-view");
     const projectTitleInput = document.getElementById("project-title");
     const projectLimitInput = document.getElementById("project-limit");
+    const projectCurrencySelect = document.getElementById("project-currency");
     const projectsListEl = document.getElementById("projects-list");
     const projectDetailTitleEl = document.getElementById("project-detail-title");
     const projectDetailSummaryEl = document.getElementById("project-detail-summary");
@@ -523,6 +510,7 @@
     const entriesListEl = document.getElementById("entries-list");
     const recurringTitleInput = document.getElementById("recurring-title");
     const recurringAmountInput = document.getElementById("recurring-amount");
+    const recurringCurrencySelect = document.getElementById("recurring-currency");
     const recurringDayInput = document.getElementById("recurring-day");
     const recurringListEl = document.getElementById("recurring-list");
 
@@ -1105,23 +1093,28 @@
     }
 
     // ---- Бюджет ----
-    const CURRENCIES = { RUB: "₽", USD: "$", EUR: "€", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴" };
-    let currentCurrency = "RUB";
+    const CURRENCIES = {
+      USD: "$", EUR: "€", UZS: "сум", RUB: "₽", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴",
+    };
     let allProjects = [];
     let allEntries = [];
     let allRecurring = [];
     let currentArchiveFilter = "active";
     let activeProjectId = null;
 
-    Object.entries(CURRENCIES).forEach(([code, symbol]) => {
-      const opt = document.createElement("option");
-      opt.value = code;
-      opt.textContent = `${code} (${symbol})`;
-      budgetCurrencySelect.appendChild(opt);
-    });
+    function populateCurrencySelect(selectEl) {
+      Object.entries(CURRENCIES).forEach(([code, symbol]) => {
+        const opt = document.createElement("option");
+        opt.value = code;
+        opt.textContent = `${code} (${symbol})`;
+        selectEl.appendChild(opt);
+      });
+    }
+    populateCurrencySelect(projectCurrencySelect);
+    populateCurrencySelect(recurringCurrencySelect);
 
-    function formatAmount(n) {
-      return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currentCurrency] || currentCurrency}`;
+    function formatAmount(n, currency) {
+      return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currency] || currency}`;
     }
 
     function projectStats(projectId) {
@@ -1158,7 +1151,8 @@
         title.textContent = project.title;
         const amounts = document.createElement("span");
         amounts.className = "due";
-        amounts.textContent = `${formatAmount(netSpent)} / ${formatAmount(project.limit)}`;
+        amounts.textContent =
+          `${formatAmount(netSpent, project.currency)} / ${formatAmount(project.limit, project.currency)}`;
         header.appendChild(title);
         header.appendChild(amounts);
 
@@ -1208,10 +1202,10 @@
       const { entries, netSpent } = projectStats(project.id);
       const remaining = project.limit - netSpent;
       projectDetailSummaryEl.textContent =
-        `Потрачено: ${formatAmount(netSpent)} из ${formatAmount(project.limit)}` +
+        `Потрачено: ${formatAmount(netSpent, project.currency)} из ${formatAmount(project.limit, project.currency)}` +
         (remaining >= 0
-          ? ` (осталось ${formatAmount(remaining)})`
-          : ` (превышение ${formatAmount(-remaining)})`);
+          ? ` (осталось ${formatAmount(remaining, project.currency)})`
+          : ` (превышение ${formatAmount(-remaining, project.currency)})`);
 
       entriesListEl.innerHTML = "";
       if (entries.length === 0) {
@@ -1225,7 +1219,7 @@
             const sign = entry.type === "income" ? "+" : "−";
             const amount = document.createElement("span");
             amount.className = "text entry-amount " + entry.type;
-            amount.textContent = `${sign} ${formatAmount(entry.amount)}`;
+            amount.textContent = `${sign} ${formatAmount(entry.amount, project.currency)}`;
             li.appendChild(amount);
             if (entry.comment) {
               const comment = document.createElement("span");
@@ -1253,6 +1247,7 @@
       await addDoc(collection(db, "budget_projects"), {
         title,
         limit,
+        currency: projectCurrencySelect.value,
         status: "active",
         authorUid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
@@ -1346,7 +1341,7 @@
           text.textContent = payment.title;
           const due = document.createElement("span");
           due.className = "due";
-          due.textContent = `${formatAmount(payment.amount)} · ${payment.dueDay} числа`;
+          due.textContent = `${formatAmount(payment.amount, payment.currency)} · ${payment.dueDay} числа`;
           li.appendChild(text);
           li.appendChild(due);
           recurringListEl.appendChild(li);
@@ -1365,6 +1360,7 @@
       await addDoc(collection(db, "recurring_payments"), {
         title,
         amount,
+        currency: recurringCurrencySelect.value,
         dueDay,
         status: "active",
         authorUid: auth.currentUser.uid,
@@ -1376,11 +1372,6 @@
       recurringDayInput.value = "";
       haptic("success");
     }
-
-    budgetCurrencySelect.addEventListener("change", async () => {
-      currentCurrency = budgetCurrencySelect.value;
-      await setDoc(doc(db, "settings", "budget"), { currency: currentCurrency }, { merge: true });
-    });
 
     function startBudgetListeners() {
       onSnapshot(collection(db, "budget_projects"), (snapshot) => {
@@ -1395,13 +1386,6 @@
       });
       onSnapshot(collection(db, "recurring_payments"), (snapshot) => {
         allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        renderRecurring();
-      });
-      onSnapshot(doc(db, "settings", "budget"), (snapshot) => {
-        currentCurrency = snapshot.exists() ? snapshot.data().currency || "RUB" : "RUB";
-        budgetCurrencySelect.value = currentCurrency;
-        renderProjects();
-        if (activeProjectId) renderProjectDetail();
         renderRecurring();
       });
     }

@@ -191,7 +191,9 @@ exports.sendEventReminders = onSchedule(
 );
 
 const RECURRING_REMINDER_DAYS_BEFORE = 3;
-const CURRENCY_SYMBOLS = { RUB: "₽", USD: "$", EUR: "€", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴" };
+const CURRENCY_SYMBOLS = {
+  USD: "$", EUR: "€", UZS: "сум", RUB: "₽", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴",
+};
 
 function dayAndMonthKeyInTimeZone(timeZone) {
   const iso = isoDateInTimeZone(timeZone, 0); // "YYYY-MM-DD"
@@ -205,17 +207,15 @@ exports.sendRecurringPaymentReminders = onSchedule(
     const db = getFirestore();
     const { day, monthKey } = dayAndMonthKeyInTimeZone(REMINDER_TIMEZONE);
 
-    const [paymentsSnap, usersSnap, settingsSnap] = await Promise.all([
+    const [paymentsSnap, usersSnap] = await Promise.all([
       db.collection("recurring_payments").where("status", "==", "active").get(),
       db.collection("users").get(),
-      db.collection("settings").doc("budget").get(),
     ]);
     const chatIds = usersSnap.docs.map((d) => d.id);
-    const currency = settingsSnap.exists() ? settingsSnap.data().currency || "RUB" : "RUB";
-    const symbol = CURRENCY_SYMBOLS[currency] || currency;
 
     for (const paymentDoc of paymentsSnap.docs) {
       const payment = paymentDoc.data();
+      const symbol = CURRENCY_SYMBOLS[payment.currency] || payment.currency || "";
       const reminderDay = payment.dueDay - RECURRING_REMINDER_DAYS_BEFORE;
       const updates = {};
       let messageText = null;
