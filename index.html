@@ -165,6 +165,22 @@
     }
     .cal-day.selected .dot { background: var(--tg-theme-button-text-color, #ffffff); }
     #agenda-title { font-size: 14px; color: var(--tg-theme-hint-color, #999999); margin: 0 0 8px; }
+    .list li.event-row { cursor: pointer; }
+    .list li .location-link {
+      font-size: 16px;
+      text-decoration: none;
+      margin-left: 4px;
+    }
+    .form-actions { display: flex; gap: 8px; }
+    .text-btn {
+      flex: 1;
+      border: none;
+      background: none;
+      padding: 8px;
+      font-size: 14px;
+      color: var(--tg-theme-link-color, #2481cc);
+    }
+    .text-btn.danger { color: var(--tg-theme-destructive-text-color, #e53935); }
   </style>
 </head>
 <body>
@@ -200,6 +216,11 @@
           <input id="event-end-time" type="time">
         </div>
         <input id="event-place" type="text" placeholder="Место (необязательно)">
+        <input id="event-location" type="url" placeholder="Ссылка на карту (необязательно)">
+        <div class="form-actions" id="event-form-actions" style="display: none;">
+          <button type="button" class="text-btn danger" id="event-delete-btn">Удалить событие</button>
+          <button type="button" class="text-btn" id="event-cancel-btn">Отмена</button>
+        </div>
       </div>
 
       <div class="cal-header">
@@ -233,7 +254,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
     import {
-      getFirestore, collection, addDoc, doc, updateDoc,
+      getFirestore, collection, addDoc, doc, updateDoc, deleteDoc,
       query, where, orderBy, onSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
@@ -266,6 +287,10 @@
     const eventEndDateInput = document.getElementById("event-end-date");
     const eventEndTimeInput = document.getElementById("event-end-time");
     const eventPlaceInput = document.getElementById("event-place");
+    const eventLocationInput = document.getElementById("event-location");
+    const eventFormActions = document.getElementById("event-form-actions");
+    const eventDeleteBtn = document.getElementById("event-delete-btn");
+    const eventCancelBtn = document.getElementById("event-cancel-btn");
     const calTitleEl = document.getElementById("cal-title");
     const calGridEl = document.getElementById("cal-grid");
     const agendaTitleEl = document.getElementById("agenda-title");
@@ -285,10 +310,13 @@
     const pages = {
       tasks: { mainButtonText: "Добавить задачу", add: addTask },
       shopping: { mainButtonText: "Добавить покупку", add: addShoppingItem },
-      calendar: { mainButtonText: "Добавить событие", add: addEvent },
+      calendar: { mainButtonText: "Добавить событие", add: saveEvent },
     };
 
     function switchPage(pageId) {
+      if (currentPage === "calendar" && pageId !== "calendar" && editingEventId) {
+        resetEventForm();
+      }
       currentPage = pageId;
       document.querySelectorAll(".page").forEach((el) => {
         el.classList.toggle("active", el.id === "page-" + pageId);
@@ -461,6 +489,7 @@
     let calendarViewDate = new Date(); // первое число месяца, который сейчас показан в сетке
     calendarViewDate.setDate(1);
     let selectedDate = new Date(); // выбранный день (для повестки снизу)
+    let editingEventId = null; // id события, которое сейчас редактируется, или null (режим добавления)
 
     function eventsOnDate(dateObj) {
       const key = localDateStr(dateObj);
@@ -536,6 +565,8 @@
 
       dayEvents.forEach((ev) => {
         const li = document.createElement("li");
+        li.className = "event-row";
+        li.addEventListener("click", () => startEditEvent(ev));
 
         const text = document.createElement("span");
         text.className = "text";
@@ -552,6 +583,20 @@
 
         li.appendChild(text);
         li.appendChild(when);
+
+        if (ev.locationUrl) {
+          const link = document.createElement("a");
+          link.className = "location-link";
+          link.href = ev.locationUrl;
+          link.textContent = "📍";
+          link.addEventListener("click", (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            tg.openLink(ev.locationUrl);
+          });
+          li.appendChild(link);
+        }
+
         eventsList.appendChild(li);
       });
     }
@@ -559,7 +604,7 @@
     function startEventsListener() {
       const eventsQuery = query(collection(db, "events"), orderBy("startAt", "asc"));
       onSnapshot(eventsQuery, (snapshot) => {
-        allEvents = snapshot.docs.map((d) => d.data());
+        allEvents = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderCalendarGrid();
         renderAgenda();
       }, (err) => {
@@ -576,7 +621,48 @@
       renderCalendarGrid();
     });
 
-    async function addEvent() {
+    function startEditEvent(ev) {
+      editingEventId = ev.id;
+      eventTitleInput.value = ev.title;
+      eventStartDateInput.value = ev.startDate;
+      eventStartTimeInput.value = ev.startTime || "";
+      eventEndDateInput.value = ev.endDate || "";
+      eventEndTimeInput.value = ev.endTime || "";
+      eventPlaceInput.value = ev.place || "";
+      eventLocationInput.value = ev.locationUrl || "";
+      eventFormActions.style.display = "flex";
+      tg.MainButton.setText("Сохранить изменения");
+      tg.BackButton.show();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetEventForm() {
+      editingEventId = null;
+      eventTitleInput.value = "";
+      eventStartDateInput.value = "";
+      eventStartTimeInput.value = "";
+      eventEndDateInput.value = "";
+      eventEndTimeInput.value = "";
+      eventPlaceInput.value = "";
+      eventLocationInput.value = "";
+      eventFormActions.style.display = "none";
+      tg.MainButton.setText(pages.calendar.mainButtonText);
+      tg.BackButton.hide();
+    }
+
+    eventCancelBtn.addEventListener("click", resetEventForm);
+    tg.BackButton.onClick(() => {
+      if (editingEventId) resetEventForm();
+    });
+
+    eventDeleteBtn.addEventListener("click", async () => {
+      if (!editingEventId) return;
+      await deleteDoc(doc(db, "events", editingEventId));
+      resetEventForm();
+      haptic("success");
+    });
+
+    async function saveEvent() {
       const title = eventTitleInput.value.trim();
       const startDate = eventStartDateInput.value;
       if (!title || !startDate) {
@@ -589,25 +675,31 @@
       const endDate = eventEndDateInput.value || startDate;
       const endTime = eventEndTimeInput.value || null;
       const startAt = new Date(`${startDate}T${startTime || "00:00"}:00`);
-
-      await addDoc(collection(db, "events"), {
+      const eventData = {
         title,
         startDate,
         startTime,
         endDate,
         endTime,
         place: eventPlaceInput.value.trim() || null,
+        locationUrl: eventLocationInput.value.trim() || null,
         startAt,
-        authorUid: auth.currentUser.uid,
-        createdAt: serverTimestamp(),
-      });
+        // сбрасываем флаги напоминаний — если время события изменилось, напоминания должны прийти заново
+        reminded1Day: false,
+        reminded2Hours: false,
+      };
 
-      eventTitleInput.value = "";
-      eventStartDateInput.value = "";
-      eventStartTimeInput.value = "";
-      eventEndDateInput.value = "";
-      eventEndTimeInput.value = "";
-      eventPlaceInput.value = "";
+      if (editingEventId) {
+        await updateDoc(doc(db, "events", editingEventId), eventData);
+      } else {
+        await addDoc(collection(db, "events"), {
+          ...eventData,
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      resetEventForm();
       haptic("success");
     }
 
