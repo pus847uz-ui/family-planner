@@ -199,22 +199,20 @@
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.5);
+      background: var(--tg-theme-bg-color, #ffffff);
       z-index: 1000;
       display: flex;
-      align-items: flex-end;
     }
     .modal-sheet {
       width: 100%;
-      max-height: 85vh;
+      height: 100%;
       background: var(--tg-theme-bg-color, #ffffff);
-      border-radius: 16px 16px 0 0;
-      padding: 12px;
+      padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0));
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
-    .modal-header { display: flex; gap: 8px; align-items: center; }
+    .modal-header { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
     .modal-header input { flex: 1; min-width: 0; }
     .modal-header button {
       border: none;
@@ -222,21 +220,32 @@
       font-size: 20px;
       color: var(--tg-theme-hint-color, #999999);
       padding: 4px 8px;
+      flex-shrink: 0;
     }
     .search-results {
       list-style: none;
       margin: 0;
       padding: 0;
-      max-height: 140px;
+      max-height: 35vh;
       overflow-y: auto;
+      flex-shrink: 0;
     }
+    .search-results:empty { display: none; }
     .search-results li {
       padding: 10px 8px;
       font-size: 14px;
       border-bottom: 1px solid rgba(127, 127, 127, 0.15);
     }
-    #leaflet-map { height: 280px; border-radius: 12px; }
+    #leaflet-map { flex: 1; min-height: 0; border-radius: 12px; }
+    #picked-address {
+      flex-shrink: 0;
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      padding: 4px 2px;
+      min-height: 18px;
+    }
     .map-confirm-btn {
+      flex-shrink: 0;
       border: none;
       border-radius: 10px;
       padding: 14px;
@@ -325,6 +334,7 @@
       </div>
       <ul id="map-search-results" class="search-results"></ul>
       <div id="leaflet-map"></div>
+      <div id="picked-address"></div>
       <button type="button" id="map-confirm-btn" class="map-confirm-btn">Выбрать эту точку</button>
     </div>
   </div>
@@ -432,26 +442,47 @@
     // ---- Карта (выбор места для события) ----
     let leafletMap = null;
     let leafletMarker = null;
+    const pickedAddressEl = document.getElementById("picked-address");
 
     function ensureMapInitialized() {
       if (leafletMap) return;
-      leafletMap = L.map("leaflet-map").setView([55.75, 37.62], 4); // старт: далеко отдалено, координаты не важны
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap",
+      leafletMap = L.map("leaflet-map").setView([55.75, 37.62], 4);
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
+        attribution: "© OpenStreetMap © CARTO",
+        maxZoom: 19,
       }).addTo(leafletMap);
       leafletMarker = L.marker([55.75, 37.62], { draggable: true }).addTo(leafletMap);
+
       leafletMap.on("click", (e) => {
         leafletMarker.setLatLng(e.latlng);
+        updateAddressLabel(e.latlng);
       });
+      leafletMarker.on("dragend", () => {
+        updateAddressLabel(leafletMarker.getLatLng());
+      });
+    }
+
+    async function updateAddressLabel(latlng) {
+      pickedAddressEl.textContent = "Определяю адрес...";
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}`
+        );
+        const data = await res.json();
+        pickedAddressEl.textContent = data.display_name || "Адрес не определён";
+      } catch (err) {
+        pickedAddressEl.textContent = "Не удалось определить адрес";
+      }
     }
 
     function centerMapOnBestGuess() {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
-            const latlng = [pos.coords.latitude, pos.coords.longitude];
+            const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
             leafletMap.setView(latlng, 14);
             leafletMarker.setLatLng(latlng);
+            updateAddressLabel(latlng);
           },
           () => {}, // геолокация недоступна/запрещена — остаёмся на дефолтном виде
           { timeout: 4000 }
@@ -463,6 +494,7 @@
       mapModal.style.display = "flex";
       mapSearchResults.innerHTML = "";
       mapSearchInput.value = "";
+      pickedAddressEl.textContent = "";
       ensureMapInitialized();
       setTimeout(() => {
         leafletMap.invalidateSize();
@@ -470,9 +502,10 @@
         // иначе пытаемся определить текущее местоположение
         const match = eventLocationInput.value.match(/q=(-?\d+\.\d+),(-?\d+\.\d+)/);
         if (match) {
-          const latlng = [Number(match[1]), Number(match[2])];
+          const latlng = L.latLng(Number(match[1]), Number(match[2]));
           leafletMap.setView(latlng, 15);
           leafletMarker.setLatLng(latlng);
+          updateAddressLabel(latlng);
         } else {
           centerMapOnBestGuess();
         }
@@ -483,9 +516,14 @@
       mapModal.style.display = "none";
     }
 
+    let searchDebounceTimer = null;
+
     async function searchPlace() {
       const q = mapSearchInput.value.trim();
-      if (!q) return;
+      if (!q) {
+        mapSearchResults.innerHTML = "";
+        return;
+      }
       mapSearchResults.innerHTML = '<li>Ищу...</li>';
       try {
         const res = await fetch(
@@ -502,9 +540,10 @@
           const li = document.createElement("li");
           li.textContent = place.display_name;
           li.addEventListener("click", () => {
-            const latlng = [Number(place.lat), Number(place.lon)];
+            const latlng = L.latLng(Number(place.lat), Number(place.lon));
             leafletMap.setView(latlng, 16);
             leafletMarker.setLatLng(latlng);
+            pickedAddressEl.textContent = place.display_name;
             if (!eventPlaceInput.value.trim()) {
               eventPlaceInput.value = place.display_name.split(",")[0];
             }
@@ -523,8 +562,13 @@
     mapSearchInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        clearTimeout(searchDebounceTimer);
         searchPlace();
       }
+    });
+    mapSearchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(searchPlace, 500);
     });
     mapConfirmBtn.addEventListener("click", () => {
       const latlng = leafletMarker.getLatLng();
