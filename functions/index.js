@@ -6,6 +6,7 @@ const {
   onDocumentUpdated,
   onDocumentDeleted,
 } = require("firebase-functions/v2/firestore");
+const { onMessagePublished } = require("firebase-functions/v2/pubsub");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
@@ -444,5 +445,33 @@ exports.telegramWebhook = onRequest(
     }
 
     res.status(200).send("OK");
+  }
+);
+
+// ---- Бюджетный алерт Google Cloud/Firebase → Telegram (вместо почты) ----
+exports.onBudgetAlert = onMessagePublished(
+  { topic: "budget-alerts", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const data = event.data.message.json;
+    if (!data || data.alertThresholdExceeded === undefined || data.alertThresholdExceeded === null) {
+      // Pub/Sub-уведомление о бюджете шлётся при каждом обновлении трат, не только при
+      // пересечении порога — это поле присутствует только когда порог реально превышен.
+      return;
+    }
+
+    const currency = data.currencyCode || "USD";
+    const costAmount = Number(data.costAmount || 0);
+    const budgetAmount = Number(data.budgetAmount || 0);
+    const pct = Math.round((data.alertThresholdExceeded || 0) * 100);
+
+    const text =
+      `⚠️ Бюджет Google Cloud/Firebase: превышен порог ${pct}%\n` +
+      `Потрачено ${costAmount.toFixed(2)} ${currency} из ${budgetAmount.toFixed(2)} ${currency}`;
+
+    const db = getFirestore();
+    const usersSnap = await db.collection("users").get();
+    const chatIds = usersSnap.docs.map((d) => d.id);
+
+    await Promise.all(chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, text)));
   }
 );
