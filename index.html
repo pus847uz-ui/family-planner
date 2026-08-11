@@ -2227,6 +2227,11 @@
     let allChecklistItems = [];
     let allBookings = [];
     const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
+
+    function extractFirstUrl(text) {
+      const match = (text || "").match(/https?:\/\/\S+/);
+      return match ? match[0] : null;
+    }
     const TRIP_STATUS_LABELS = { planned: "В планах", confirmed: "Подтверждена", completed: "Завершена" };
 
     populateCurrencySelect(tripCurrencySelect);
@@ -2351,6 +2356,20 @@
             text.textContent = booking.text;
             li.appendChild(icon);
             li.appendChild(text);
+
+            const externalUrl = extractFirstUrl(booking.text);
+            if (externalUrl) {
+              const openExternal = document.createElement("a");
+              openExternal.className = "location-link";
+              openExternal.href = externalUrl;
+              openExternal.textContent = "🔗";
+              openExternal.title = "Открыть ссылку из сообщения (например, бронь на Booking.com)";
+              openExternal.addEventListener("click", (e) => {
+                e.preventDefault();
+                tg.openLink(externalUrl);
+              });
+              li.appendChild(openExternal);
+            }
 
             if (booking.telegramMessageLink) {
               const openLink = document.createElement("a");
