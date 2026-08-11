@@ -626,6 +626,10 @@
         </div>
         <ul id="trip-checklist-list" class="list"></ul>
 
+        <h3>📌 Бронирования</h3>
+        <p class="plan-meta" style="margin: 0 0 8px;">Ответьте на сообщение в теме командой «/confirm тип» (например, /confirm flight), чтобы закрепить его здесь.</p>
+        <ul id="trip-bookings-list" class="list"></ul>
+
         <div id="trip-discussion"></div>
 
         <div class="form-actions">
@@ -881,6 +885,7 @@
     const tripChecklistAddBtn = document.getElementById("trip-checklist-add-btn");
     const tripChecklistListEl = document.getElementById("trip-checklist-list");
     const tripDeleteBtn = document.getElementById("trip-delete-btn");
+    const tripBookingsListEl = document.getElementById("trip-bookings-list");
 
     // Досуг
     const leisureListView = document.getElementById("leisure-list-view");
@@ -2220,6 +2225,8 @@
     let allTrips = [];
     let activeTripId = null;
     let allChecklistItems = [];
+    let allBookings = [];
+    const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
     const TRIP_STATUS_LABELS = { planned: "В планах", confirmed: "Подтверждена", completed: "Завершена" };
 
     populateCurrencySelect(tripCurrencySelect);
@@ -2324,6 +2331,38 @@
             li.appendChild(checkbox);
             li.appendChild(text);
             tripChecklistListEl.appendChild(li);
+          });
+      }
+
+      const bookings = allBookings.filter((b) => b.planId === activeTripId);
+      tripBookingsListEl.innerHTML = "";
+      if (bookings.length === 0) {
+        tripBookingsListEl.innerHTML = '<li class="empty" style="background:none;">Пока пусто</li>';
+      } else {
+        bookings
+          .slice()
+          .sort((a, b) => (a.createdAt?.toMillis() || 0) - (b.createdAt?.toMillis() || 0))
+          .forEach((booking) => {
+            const li = document.createElement("li");
+            const icon = document.createElement("span");
+            icon.textContent = BOOKING_TYPE_ICON[booking.type] || "📌";
+            const text = document.createElement("span");
+            text.className = "text";
+            text.textContent = booking.text;
+            const removeBtn = document.createElement("button");
+            removeBtn.type = "button";
+            removeBtn.className = "text-btn danger";
+            removeBtn.textContent = "✕";
+            removeBtn.addEventListener("click", async () => {
+              const confirmed = await confirmAction("Убрать это бронирование из списка?");
+              if (!confirmed) return;
+              await deleteDoc(doc(db, "plan_bookings", booking.id));
+              haptic("success");
+            });
+            li.appendChild(icon);
+            li.appendChild(text);
+            li.appendChild(removeBtn);
+            tripBookingsListEl.appendChild(li);
           });
       }
 
@@ -2959,6 +2998,10 @@
       onSnapshot(collection(db, "plan_menu_items"), (snapshot) => {
         allMenuItems = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         if (activeMealId) renderMealDetail();
+      });
+      onSnapshot(collection(db, "plan_bookings"), (snapshot) => {
+        allBookings = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        if (activeTripId) renderTripDetail();
       });
     }
 

@@ -8,15 +8,17 @@ const {
 } = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 
 initializeApp();
 
 const BOT_TOKEN = defineSecret("BOT_TOKEN");
+const WEBHOOK_SECRET = defineSecret("WEBHOOK_SECRET");
 // Приватная супергруппа с включённым режимом Topics — обсуждения поездок/досуга/приёмов пищи.
 // Не секрет (просто числовой ID чата), поэтому хранится как обычная константа.
 const TOPICS_CHAT_ID = -1004324845791;
+const WEBAPP_URL = "https://pus847uz-ui.github.io/family-planner/";
 const MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60;
 
 function checkTelegramInitData(initData, botToken) {
@@ -351,5 +353,96 @@ exports.onPlanDeleted = onDocumentDeleted(
       chat_id: plan.telegramChatId,
       message_thread_id: plan.telegramMessageThreadId,
     });
+  }
+);
+
+// ---- Webhook бота: /start в личке + /confirm для закрепления бронирований в теме поездки ----
+const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
+
+function buildTelegramMessageLink(chatId, threadId, messageId) {
+  const internalId = String(chatId).replace(/^-100/, "");
+  return `https://t.me/c/${internalId}/${threadId}/${messageId}`;
+}
+
+async function handleStartCommand(botToken, message) {
+  await callTelegramApi(botToken, "sendMessage", {
+    chat_id: message.chat.id,
+    text: "Привет! Открой планировщик кнопкой ниже:",
+    reply_markup: {
+      inline_keyboard: [[{ text: "Открыть Family Planner", web_app: { url: WEBAPP_URL } }]],
+    },
+  });
+}
+
+async function handleConfirmCommand(botToken, message) {
+  const threadId = message.message_thread_id;
+
+  if (!message.reply_to_message || !threadId) {
+    await callTelegramApi(botToken, "sendMessage", {
+      chat_id: message.chat.id,
+      message_thread_id: threadId,
+      reply_to_message_id: message.message_id,
+      text: "Чтобы закрепить бронь: ответьте (reply) на сообщение с деталями командой /confirm тип (например, /confirm flight)",
+    });
+    return;
+  }
+
+  const type = message.text.slice("/confirm".length).trim() || "other";
+  const db = getFirestore();
+  const plansSnap = await db
+    .collection("plans")
+    .where("telegramChatId", "==", message.chat.id)
+    .where("telegramMessageThreadId", "==", threadId)
+    .limit(1)
+    .get();
+
+  if (plansSnap.empty) return;
+
+  const planDoc = plansSnap.docs[0];
+  const confirmedText = message.reply_to_message.text || message.reply_to_message.caption || "";
+
+  await db.collection("plan_bookings").add({
+    planId: planDoc.id,
+    type,
+    text: confirmedText,
+    telegramMessageId: message.reply_to_message.message_id,
+    telegramMessageLink: buildTelegramMessageLink(
+      message.chat.id,
+      threadId,
+      message.reply_to_message.message_id
+    ),
+    confirmedByTelegramId: String(message.from.id),
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  await callTelegramApi(botToken, "sendMessage", {
+    chat_id: message.chat.id,
+    message_thread_id: threadId,
+    reply_to_message_id: message.message_id,
+    text: `${BOOKING_TYPE_ICON[type] || "📌"} Добавлено в бронирования поездки`,
+  });
+}
+
+exports.telegramWebhook = onRequest(
+  { secrets: [BOT_TOKEN, WEBHOOK_SECRET] },
+  async (req, res) => {
+    if (req.headers["x-telegram-bot-api-secret-token"] !== WEBHOOK_SECRET.value()) {
+      res.status(401).send("Unauthorized");
+      return;
+    }
+
+    const message = req.body && req.body.message;
+
+    try {
+      if (message && message.text === "/start" && message.chat.type === "private") {
+        await handleStartCommand(BOT_TOKEN.value(), message);
+      } else if (message && message.text && message.text.startsWith("/confirm")) {
+        await handleConfirmCommand(BOT_TOKEN.value(), message);
+      }
+    } catch (err) {
+      console.error("telegramWebhook failed:", err);
+    }
+
+    res.status(200).send("OK");
   }
 );

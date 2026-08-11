@@ -46,5 +46,9 @@ service cloud.firestore {
     match /plan_menu_items/{itemId} {
       allow read, write: if isFamilyMember();
     }
+
+    match /plan_bookings/{bookingId} {
+      allow read, write: if isFamilyMember();
+    }
   }
 }
