@@ -359,6 +359,11 @@ exports.onPlanDeleted = onDocumentDeleted(
 
 // ---- Webhook бота: /start в личке + /confirm для закрепления бронирований в теме поездки ----
 const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
+// Telegram-клиент в группах иногда дописывает @имя_бота после команды
+// (например, "/confirm@family_planner_xyz_bot flight") — обе команды разбираются через regex,
+// чтобы не принять "@имя_бота..." за аргумент команды.
+const START_RE = /^\/start(?:@[A-Za-z0-9_]+)?$/i;
+const CONFIRM_RE = /^\/confirm(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/is;
 
 function buildTelegramMessageLink(chatId, threadId, messageId) {
   const internalId = String(chatId).replace(/^-100/, "");
@@ -388,7 +393,8 @@ async function handleConfirmCommand(botToken, message) {
     return;
   }
 
-  const type = message.text.slice("/confirm".length).trim() || "other";
+  const match = message.text.match(CONFIRM_RE);
+  const type = (match && match[1] && match[1].trim()) || "other";
   const db = getFirestore();
   const plansSnap = await db
     .collection("plans")
@@ -435,9 +441,9 @@ exports.telegramWebhook = onRequest(
     const message = req.body && req.body.message;
 
     try {
-      if (message && message.text === "/start" && message.chat.type === "private") {
+      if (message && message.text && message.chat.type === "private" && START_RE.test(message.text)) {
         await handleStartCommand(BOT_TOKEN.value(), message);
-      } else if (message && message.text && message.text.startsWith("/confirm")) {
+      } else if (message && message.text && CONFIRM_RE.test(message.text)) {
         await handleConfirmCommand(BOT_TOKEN.value(), message);
       }
     } catch (err) {
