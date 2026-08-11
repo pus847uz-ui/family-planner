@@ -586,6 +586,10 @@
             <select id="trip-currency"></select>
           </div>
         </div>
+        <div class="period-toggle" id="trip-archive-filter">
+          <button type="button" class="period-btn active" data-archive="active">Активные</button>
+          <button type="button" class="period-btn" data-archive="archived">Архив</button>
+        </div>
         <ul id="trips-list" class="list"></ul>
       </div>
 
@@ -633,6 +637,7 @@
         <div id="trip-discussion"></div>
 
         <div class="form-actions">
+          <button type="button" id="trip-archive-btn" class="text-btn">Архивировать поездку</button>
           <button type="button" id="trip-delete-btn" class="text-btn danger">Удалить поездку</button>
         </div>
       </div>
@@ -885,6 +890,7 @@
     const tripChecklistAddBtn = document.getElementById("trip-checklist-add-btn");
     const tripChecklistListEl = document.getElementById("trip-checklist-list");
     const tripDeleteBtn = document.getElementById("trip-delete-btn");
+    const tripArchiveBtn = document.getElementById("trip-archive-btn");
     const tripBookingsListEl = document.getElementById("trip-bookings-list");
 
     // Досуг
@@ -1240,7 +1246,7 @@
         }
       }
 
-      const upcomingTrips = allTrips.filter((t) => t.status !== "completed").length;
+      const upcomingTrips = allTrips.filter((t) => !t.archived && t.status !== "completed").length;
       homeStatTripsEl.textContent = upcomingTrips > 0 ? `${upcomingTrips} в планах` : "нет поездок";
 
       const openLeisure = allLeisure.filter((l) => l.status === "open").length;
@@ -2238,6 +2244,7 @@
     let activeTripId = null;
     let allChecklistItems = [];
     let allBookings = [];
+    let currentTripArchiveFilter = "active";
     const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
 
     function extractFirstUrl(text) {
@@ -2249,13 +2256,27 @@
     populateCurrencySelect(tripCurrencySelect);
     populateCurrencySelect(tripEditCurrencySelect);
 
+    document.querySelectorAll("#trip-archive-filter .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentTripArchiveFilter = btn.dataset.archive;
+        document.querySelectorAll("#trip-archive-filter .period-btn").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        renderTrips();
+      });
+    });
+
     function renderTrips() {
       tripsListEl.innerHTML = "";
       const sorted = allTrips
+        .filter((t) => (currentTripArchiveFilter === "archived" ? !!t.archived : !t.archived))
         .slice()
         .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       if (sorted.length === 0) {
-        tripsListEl.innerHTML = '<li class="empty" style="background:none;">Пока нет поездок</li>';
+        tripsListEl.innerHTML =
+          '<li class="empty" style="background:none;">' +
+          (currentTripArchiveFilter === "active" ? "Пока нет поездок" : "Архив пуст") +
+          "</li>";
         return;
       }
       sorted.forEach((trip) => {
@@ -2322,6 +2343,7 @@
         .join(" · ");
       tripStatusSelect.value = trip.status;
       tripOpenBudgetBtn.style.display = trip.budgetProjectId ? "block" : "none";
+      tripArchiveBtn.textContent = trip.archived ? "Вернуть из архива" : "Архивировать поездку";
 
       const items = allChecklistItems.filter((i) => i.planId === activeTripId);
       tripChecklistListEl.innerHTML = "";
@@ -2527,6 +2549,14 @@
       closeTripDetail();
     });
 
+    tripArchiveBtn.addEventListener("click", async () => {
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      if (!trip) return;
+      await updateDoc(doc(db, "plans", activeTripId), { archived: !trip.archived });
+      haptic("success");
+      closeTripDetail();
+    });
+
     async function createTrip() {
       const title = tripTitleInput.value.trim();
       const startDate = tripStartDateInput.value;
@@ -2562,6 +2592,7 @@
         budgetCurrency,
         budgetProjectId,
         status: "planned",
+        archived: false,
         telegramChatId: null,
         telegramMessageThreadId: null,
         telegramTopicLink: null,
