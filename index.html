@@ -1220,14 +1220,24 @@
       if (activeProjects.length === 0) {
         homeStatBudgetEl.textContent = "нет проектов";
       } else {
-        let totalLimit = 0;
-        let totalSpent = 0;
+        // проекты в разных валютах нельзя складывать напрямую — считаем процент лимита
+        // отдельно по каждой валюте и показываем самую напряжённую
+        const byCurrency = {};
         activeProjects.forEach((p) => {
-          totalLimit += p.limit;
-          totalSpent += projectStats(p.id).netSpent;
+          const currency = p.currency || "";
+          if (!byCurrency[currency]) byCurrency[currency] = { limit: 0, spent: 0 };
+          byCurrency[currency].limit += p.limit;
+          byCurrency[currency].spent += projectStats(p.id).netSpent;
         });
-        const pct = totalLimit > 0 ? Math.round((totalSpent / totalLimit) * 100) : 0;
-        homeStatBudgetEl.textContent = `${pct}% лимита`;
+        const currencies = Object.keys(byCurrency);
+        const pctFor = (c) =>
+          byCurrency[c].limit > 0 ? Math.round((byCurrency[c].spent / byCurrency[c].limit) * 100) : 0;
+        if (currencies.length === 1) {
+          homeStatBudgetEl.textContent = `${pctFor(currencies[0])}% лимита`;
+        } else {
+          const worst = currencies.reduce((a, b) => (pctFor(b) > pctFor(a) ? b : a));
+          homeStatBudgetEl.textContent = `${pctFor(worst)}% лимита (${worst})`;
+        }
       }
 
       const upcomingTrips = allTrips.filter((t) => t.status !== "completed").length;
@@ -1693,6 +1703,8 @@
 
     eventDeleteBtn.addEventListener("click", async () => {
       if (!editingEventId) return;
+      const confirmed = await confirmAction("Удалить это событие?");
+      if (!confirmed) return;
       await deleteDoc(doc(db, "events", editingEventId));
       resetEventForm();
       haptic("success");
@@ -2461,6 +2473,33 @@
       const budgetAmount = Number(tripEditBudgetInput.value) || null;
       const budgetCurrency = budgetAmount ? tripEditCurrencySelect.value : null;
 
+      const trip = allTrips.find((t) => t.id === activeTripId);
+      let budgetProjectId = trip ? trip.budgetProjectId || null : null;
+
+      if (budgetAmount && budgetProjectId) {
+        // бюджет уже был привязан к поездке раньше — просто обновляем лимит/валюту/название
+        await updateDoc(doc(db, "budget_projects", budgetProjectId), {
+          title,
+          limit: budgetAmount,
+          currency: budgetCurrency,
+        });
+      } else if (budgetAmount && !budgetProjectId) {
+        // бюджет добавили впервые при редактировании — создаём проект, как при создании поездки
+        const projectRef = await addDoc(collection(db, "budget_projects"), {
+          title,
+          limit: budgetAmount,
+          currency: budgetCurrency,
+          status: "active",
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+        budgetProjectId = projectRef.id;
+      } else if (!budgetAmount && budgetProjectId) {
+        // бюджет убрали — отвязываем поездку, сам проект и его записи не трогаем
+        // (он останется доступен как самостоятельный проект в разделе «Бюджет»)
+        budgetProjectId = null;
+      }
+
       await updateDoc(doc(db, "plans", activeTripId), {
         title,
         destination: tripEditDestinationInput.value.trim() || null,
@@ -2468,16 +2507,8 @@
         endDate: tripEditEndDateInput.value || startDate,
         budgetAmount,
         budgetCurrency,
+        budgetProjectId,
       });
-
-      const trip = allTrips.find((t) => t.id === activeTripId);
-      if (trip && trip.budgetProjectId && budgetAmount) {
-        await updateDoc(doc(db, "budget_projects", trip.budgetProjectId), {
-          title,
-          limit: budgetAmount,
-          currency: budgetCurrency,
-        });
-      }
 
       tripEditForm.style.display = "none";
       haptic("success");
