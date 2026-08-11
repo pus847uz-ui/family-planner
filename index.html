@@ -626,7 +626,7 @@
         </div>
         <ul id="trip-checklist-list" class="list"></ul>
 
-        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+        <div id="trip-discussion"></div>
 
         <div class="form-actions">
           <button type="button" id="trip-delete-btn" class="text-btn danger">Удалить поездку</button>
@@ -664,7 +664,7 @@
         <div id="leisure-detail-meta" class="plan-meta"></div>
         <div id="leisure-options-list"></div>
 
-        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+        <div id="leisure-discussion"></div>
 
         <div class="form-actions">
           <button type="button" id="leisure-delete-btn" class="text-btn danger">Удалить предложение</button>
@@ -729,7 +729,7 @@
           <ul id="meal-menu-list" class="list"></ul>
         </div>
 
-        <div class="discussion-placeholder">Обсуждение появится здесь после подключения к Telegram</div>
+        <div id="meal-discussion"></div>
 
         <div class="form-actions">
           <button type="button" id="meal-delete-btn" class="text-btn danger">Удалить приём пищи</button>
@@ -2196,6 +2196,26 @@
       container.appendChild(box);
     }
 
+    function renderDiscussionSection(containerId, plan) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = "";
+      if (plan.telegramTopicLink) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "map-confirm-btn";
+        btn.style.width = "100%";
+        btn.style.marginTop = "16px";
+        btn.textContent = "💬 Обсудить в Telegram";
+        btn.addEventListener("click", () => tg.openLink(plan.telegramTopicLink));
+        container.appendChild(btn);
+      } else {
+        const placeholder = document.createElement("div");
+        placeholder.className = "discussion-placeholder";
+        placeholder.textContent = "Тема создаётся, подождите пару секунд...";
+        container.appendChild(placeholder);
+      }
+    }
+
     // ---- Поездки ----
     let allTrips = [];
     let activeTripId = null;
@@ -2306,6 +2326,8 @@
             tripChecklistListEl.appendChild(li);
           });
       }
+
+      renderDiscussionSection("trip-discussion", trip);
     }
 
     tripStatusSelect.addEventListener("change", async () => {
@@ -2557,6 +2579,8 @@
           );
         });
       }
+
+      renderDiscussionSection("leisure-discussion", plan);
     }
 
     async function decideLeisureDate(planId, dateOption) {
@@ -2802,6 +2826,8 @@
           });
         }
       }
+
+      renderDiscussionSection("meal-discussion", meal);
     }
 
     async function decideMealPlace(planId, placeName) {

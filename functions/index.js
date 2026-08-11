@@ -1,6 +1,11 @@
 const crypto = require("crypto");
 const { onRequest } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const {
+  onDocumentCreated,
+  onDocumentUpdated,
+  onDocumentDeleted,
+} = require("firebase-functions/v2/firestore");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
@@ -9,6 +14,9 @@ const { getAuth } = require("firebase-admin/auth");
 initializeApp();
 
 const BOT_TOKEN = defineSecret("BOT_TOKEN");
+// Приватная супергруппа с включённым режимом Topics — обсуждения поездок/досуга/приёмов пищи.
+// Не секрет (просто числовой ID чата), поэтому хранится как обычная константа.
+const TOPICS_CHAT_ID = -1004324845791;
 const MAX_INIT_DATA_AGE_SECONDS = 24 * 60 * 60;
 
 function checkTelegramInitData(initData, botToken) {
@@ -238,5 +246,110 @@ exports.sendRecurringPaymentReminders = onSchedule(
         await paymentDoc.ref.update(updates);
       }
     }
+  }
+);
+
+// ---- Telegram-темы для обсуждения поездок/досуга/приёмов пищи ----
+const PLAN_TYPES = ["trip", "leisure", "meal"];
+const PLAN_TYPE_EMOJI = { trip: "✈️", leisure: "🎲", meal: "🍽" };
+const PLAN_TYPE_TITLE = { trip: "Поездка", leisure: "Досуг", meal: "Приём пищи" };
+
+async function callTelegramApi(botToken, method, params) {
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await response.json();
+  if (!data.ok) {
+    console.error(`Telegram API ${method} failed:`, data);
+  }
+  return data;
+}
+
+function buildTopicLink(chatId, threadId) {
+  const internalId = String(chatId).replace(/^-100/, "");
+  return `https://t.me/c/${internalId}/${threadId}`;
+}
+
+function isClosedStatus(type, status) {
+  if (type === "trip") return status === "completed";
+  if (type === "leisure") return status === "decided";
+  if (type === "meal") return status === "decided";
+  return false;
+}
+
+exports.onPlanCreated = onDocumentCreated(
+  { document: "plans/{planId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const plan = event.data.data();
+    if (!PLAN_TYPES.includes(plan.type)) return;
+
+    const emoji = PLAN_TYPE_EMOJI[plan.type] || "";
+    const topicResult = await callTelegramApi(BOT_TOKEN.value(), "createForumTopic", {
+      chat_id: TOPICS_CHAT_ID,
+      name: `${emoji} ${plan.title}`.slice(0, 128),
+    });
+    if (!topicResult.ok) return;
+
+    const threadId = topicResult.result.message_thread_id;
+    const link = buildTopicLink(TOPICS_CHAT_ID, threadId);
+
+    await callTelegramApi(BOT_TOKEN.value(), "sendMessage", {
+      chat_id: TOPICS_CHAT_ID,
+      message_thread_id: threadId,
+      text: `${PLAN_TYPE_TITLE[plan.type]}: ${plan.title}\n\nОбсуждайте здесь.`,
+    });
+
+    await event.data.ref.update({
+      telegramChatId: TOPICS_CHAT_ID,
+      telegramMessageThreadId: threadId,
+      telegramTopicLink: link,
+    });
+  }
+);
+
+exports.onPlanUpdated = onDocumentUpdated(
+  { document: "plans/{planId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!PLAN_TYPES.includes(after.type)) return;
+    if (!after.telegramMessageThreadId) return; // тема ещё не создана — нечего менять
+
+    if (before.title !== after.title) {
+      const emoji = PLAN_TYPE_EMOJI[after.type] || "";
+      await callTelegramApi(BOT_TOKEN.value(), "editForumTopic", {
+        chat_id: after.telegramChatId,
+        message_thread_id: after.telegramMessageThreadId,
+        name: `${emoji} ${after.title}`.slice(0, 128),
+      });
+    }
+
+    const wasClosed = isClosedStatus(before.type, before.status);
+    const isClosed = isClosedStatus(after.type, after.status);
+    if (!wasClosed && isClosed) {
+      await callTelegramApi(BOT_TOKEN.value(), "closeForumTopic", {
+        chat_id: after.telegramChatId,
+        message_thread_id: after.telegramMessageThreadId,
+      });
+    } else if (wasClosed && !isClosed) {
+      await callTelegramApi(BOT_TOKEN.value(), "reopenForumTopic", {
+        chat_id: after.telegramChatId,
+        message_thread_id: after.telegramMessageThreadId,
+      });
+    }
+  }
+);
+
+exports.onPlanDeleted = onDocumentDeleted(
+  { document: "plans/{planId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const plan = event.data.data();
+    if (!plan.telegramMessageThreadId) return;
+    await callTelegramApi(BOT_TOKEN.value(), "deleteForumTopic", {
+      chat_id: plan.telegramChatId,
+      message_thread_id: plan.telegramMessageThreadId,
+    });
   }
 );
