@@ -2349,6 +2349,22 @@
             const text = document.createElement("span");
             text.className = "text";
             text.textContent = booking.text;
+            li.appendChild(icon);
+            li.appendChild(text);
+
+            if (booking.telegramMessageLink) {
+              const openLink = document.createElement("a");
+              openLink.className = "location-link";
+              openLink.href = booking.telegramMessageLink;
+              openLink.textContent = "↗️";
+              openLink.title = "Открыть исходное сообщение в Telegram";
+              openLink.addEventListener("click", (e) => {
+                e.preventDefault();
+                tg.openLink(booking.telegramMessageLink);
+              });
+              li.appendChild(openLink);
+            }
+
             const removeBtn = document.createElement("button");
             removeBtn.type = "button";
             removeBtn.className = "text-btn danger";
@@ -2359,8 +2375,6 @@
               await deleteDoc(doc(db, "plan_bookings", booking.id));
               haptic("success");
             });
-            li.appendChild(icon);
-            li.appendChild(text);
             li.appendChild(removeBtn);
             tripBookingsListEl.appendChild(li);
           });
