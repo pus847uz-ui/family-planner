@@ -486,17 +486,26 @@
     </section>
 
     <section id="page-shopping" class="page">
+      <div class="page-title">Покупки</div>
       <div class="quick-add">
         <input id="shopping-text" type="text" placeholder="Что купить?">
+        <input id="shopping-qty" type="text" placeholder="Кол-во" style="flex: 0 0 92px; min-width: 0;">
       </div>
       <select id="shopping-assignee" style="width: 100%; margin-bottom: 12px;">
         <option value="">Не назначено</option>
       </select>
       <div class="form-actions" id="shopping-form-actions" style="display: none;">
-        <button type="button" id="shopping-delete-btn" class="text-btn danger">Удалить позицию</button>
+        <button type="button" id="shopping-notneeded-btn" class="text-btn">🚫 Не нужно</button>
+        <button type="button" id="shopping-delete-btn" class="text-btn danger">Удалить</button>
         <button type="button" id="shopping-cancel-btn" class="text-btn">Отмена</button>
       </div>
+      <div class="period-toggle" id="shopping-person-filter"></div>
       <ul id="shopping-list" class="list"></ul>
+
+      <div id="shopping-closed-section" style="display: none;">
+        <div class="group-title">Куплено сегодня</div>
+        <ul id="shopping-closed-list" class="list"></ul>
+      </div>
     </section>
 
     <section id="page-calendar" class="page">
@@ -850,10 +859,15 @@
     const tasksClosedSection = document.getElementById("tasks-closed-section");
     const tasksClosedList = document.getElementById("tasks-closed-list");
     const shoppingTextInput = document.getElementById("shopping-text");
+    const shoppingQtyInput = document.getElementById("shopping-qty");
     const shoppingAssigneeSelect = document.getElementById("shopping-assignee");
+    const shoppingPersonFilterEl = document.getElementById("shopping-person-filter");
     const shoppingFormActions = document.getElementById("shopping-form-actions");
     const shoppingDeleteBtn = document.getElementById("shopping-delete-btn");
     const shoppingCancelBtn = document.getElementById("shopping-cancel-btn");
+    const shoppingNotNeededBtn = document.getElementById("shopping-notneeded-btn");
+    const shoppingClosedSection = document.getElementById("shopping-closed-section");
+    const shoppingClosedList = document.getElementById("shopping-closed-list");
     const eventsList = document.getElementById("events-list");
     const eventTitleInput = document.getElementById("event-title");
     const eventStartDateInput = document.getElementById("event-start-date");
@@ -1336,9 +1350,11 @@
         populateAssigneeSelect(taskAssigneeSelect);
         populateAssigneeSelect(shoppingAssigneeSelect);
         populateAssigneeSelect(mealMenuAssigneeSelect);
-        // фильтр строится из списка участников, а список задач показывает их имена
+        // фильтры строятся из списка участников, а списки показывают их имена
         renderPersonFilter();
         renderTasksList();
+        renderShoppingPersonFilter();
+        renderShoppingList();
       });
     }
 
@@ -1352,7 +1368,10 @@
     // не попадает ни в один именной фильтр и иначе была бы не видна вообще.
     let currentPersonFilter = "all";
 
-    function renderPersonFilter() {
+    // Общий фильтр «Мои · Все · <имена>» — используется и в «Сделать», и в «Покупках».
+    // Возвращает актуальное значение: выбранного человека могли убрать из участников,
+    // тогда фильтр откатывается на «Все», а не остаётся указывать в никуда.
+    function renderPersonFilterInto(containerEl, currentValue, onSelect) {
       const options = [
         { value: "mine", label: "Мои" },
         { value: "all", label: "Все" },
@@ -1361,28 +1380,44 @@
         .filter((u) => u.id !== auth.currentUser.uid)
         .forEach((u) => options.push({ value: u.id, label: u.name || u.id }));
 
-      // выбранного человека могли убрать из участников — не оставляем фильтр в никуда
-      if (!options.some((o) => o.value === currentPersonFilter)) currentPersonFilter = "all";
+      if (!options.some((o) => o.value === currentValue)) currentValue = "all";
 
-      taskPersonFilterEl.innerHTML = "";
+      containerEl.innerHTML = "";
       options.forEach((option) => {
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.className = "period-btn" + (option.value === currentPersonFilter ? " active" : "");
+        btn.className = "period-btn" + (option.value === currentValue ? " active" : "");
         btn.textContent = option.label;
-        btn.addEventListener("click", () => {
-          currentPersonFilter = option.value;
-          renderPersonFilter();
-          renderTasksList();
-        });
-        taskPersonFilterEl.appendChild(btn);
+        btn.addEventListener("click", () => onSelect(option.value));
+        containerEl.appendChild(btn);
+      });
+
+      return currentValue;
+    }
+
+    function matchesPersonFilter(record, filterValue) {
+      if (filterValue === "all") return true;
+      if (filterValue === "mine") return record.assigneeUid === auth.currentUser.uid;
+      return record.assigneeUid === filterValue;
+    }
+
+    function personFilterEmptyMessage(filterValue, emptyAllMessage) {
+      if (filterValue === "all") return emptyAllMessage;
+      if (filterValue === "mine") return "На вас ничего не назначено";
+      const user = allFamilyUsers.find((u) => u.id === filterValue);
+      return `На ${user ? user.name || user.id : "участника"} ничего не назначено`;
+    }
+
+    function renderPersonFilter() {
+      currentPersonFilter = renderPersonFilterInto(taskPersonFilterEl, currentPersonFilter, (value) => {
+        currentPersonFilter = value;
+        renderPersonFilter();
+        renderTasksList();
       });
     }
 
     function taskMatchesPersonFilter(task) {
-      if (currentPersonFilter === "all") return true;
-      if (currentPersonFilter === "mine") return task.assigneeUid === auth.currentUser.uid;
-      return task.assigneeUid === currentPersonFilter;
+      return matchesPersonFilter(task, currentPersonFilter);
     }
 
     // Порядок групп фиксированный, пустые не показываются.
@@ -1453,10 +1488,7 @@
     }
 
     function emptyListMessage() {
-      if (currentPersonFilter === "all") return "Пока пусто — добавьте первую задачу";
-      if (currentPersonFilter === "mine") return "На вас ничего не назначено";
-      const user = allFamilyUsers.find((u) => u.id === currentPersonFilter);
-      return `На ${user ? user.name || user.id : "участника"} ничего не назначено`;
+      return personFilterEmptyMessage(currentPersonFilter, "Пока пусто — добавьте первую задачу");
     }
 
     function renderTasksList() {
@@ -1696,16 +1728,39 @@
     // ---- Покупки ----
     let editingShoppingId = null;
 
-    function renderShopping(snapshot) {
-      cachedShopping = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      updateHomeStats();
+    let currentShoppingPersonFilter = "all";
+    let cachedBoughtToday = [];
 
+    function renderShoppingPersonFilter() {
+      currentShoppingPersonFilter = renderPersonFilterInto(
+        shoppingPersonFilterEl,
+        currentShoppingPersonFilter,
+        (value) => {
+          currentShoppingPersonFilter = value;
+          renderShoppingPersonFilter();
+          renderShoppingList();
+        }
+      );
+    }
+
+    // Список намеренно плоский, без группировки по людям: его читают у полки в магазине,
+    // и там нужен один сплошной перечень. Разделение по людям даёт фильтр сверху.
+    function renderShoppingList() {
       shoppingList.innerHTML = "";
-      if (snapshot.empty) {
-        shoppingList.innerHTML = '<li class="empty" style="background:none;">Список пуст</li>';
+      const visible = cachedShopping.filter((item) =>
+        matchesPersonFilter(item, currentShoppingPersonFilter)
+      );
+
+      if (visible.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.style.background = "none";
+        empty.textContent = personFilterEmptyMessage(currentShoppingPersonFilter, "Список пуст");
+        shoppingList.appendChild(empty);
         return;
       }
-      cachedShopping.forEach((item) => {
+
+      visible.forEach((item) => {
         const li = document.createElement("li");
         li.className = "event-row";
 
@@ -1714,10 +1769,7 @@
         checkbox.addEventListener("click", (e) => e.stopPropagation());
         checkbox.addEventListener("change", async () => {
           haptic();
-          await updateDoc(doc(db, "shopping_items", item.id), {
-            status: "bought",
-            boughtAt: serverTimestamp(),
-          });
+          await closeShoppingItem(item.id, "bought");
         });
 
         const text = document.createElement("span");
@@ -1727,16 +1779,24 @@
         li.appendChild(checkbox);
         li.appendChild(text);
 
-        if (item.assigneeUid) {
+        const meta = [item.quantity, item.assigneeUid ? assigneeName(item.assigneeUid) : null]
+          .filter(Boolean);
+        if (meta.length > 0) {
           const who = document.createElement("span");
           who.className = "due";
-          who.textContent = assigneeName(item.assigneeUid);
+          who.textContent = meta.join(" · ");
           li.appendChild(who);
         }
 
         li.addEventListener("click", () => startEditShoppingItem(item));
         shoppingList.appendChild(li);
       });
+    }
+
+    function renderShopping(snapshot) {
+      cachedShopping = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      updateHomeStats();
+      renderShoppingList();
     }
 
     function startShoppingListener() {
@@ -1750,9 +1810,69 @@
       });
     }
 
+    async function closeShoppingItem(itemId, status) {
+      await updateDoc(doc(db, "shopping_items", itemId), {
+        status,
+        closedAt: serverTimestamp(),
+      });
+    }
+
+    async function reopenShoppingItem(itemId) {
+      await updateDoc(doc(db, "shopping_items", itemId), {
+        status: "active",
+        closedAt: null,
+      });
+    }
+
+    function renderBoughtToday() {
+      shoppingClosedSection.style.display = cachedBoughtToday.length > 0 ? "block" : "none";
+      shoppingClosedList.innerHTML = "";
+
+      cachedBoughtToday.forEach((item) => {
+        const li = document.createElement("li");
+
+        const icon = document.createElement("span");
+        icon.textContent = item.status === "bought" ? "✅" : "🚫";
+
+        const text = document.createElement("span");
+        text.className = "text";
+        text.textContent = item.quantity ? `${item.text} · ${item.quantity}` : item.text;
+
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "text-btn";
+        back.style.flex = "0 0 auto";
+        back.textContent = "Вернуть";
+        back.addEventListener("click", async () => {
+          await reopenShoppingItem(item.id);
+          haptic("success");
+        });
+
+        li.appendChild(icon);
+        li.appendChild(text);
+        li.appendChild(back);
+        shoppingClosedList.appendChild(li);
+      });
+    }
+
+    function startBoughtTodayListener() {
+      const closedQuery = query(
+        collection(db, "shopping_items"),
+        where("closedAt", ">=", startOfTodayDate()),
+        orderBy("closedAt", "desc")
+      );
+      onSnapshot(closedQuery, (snapshot) => {
+        cachedBoughtToday = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderBoughtToday();
+      }, (err) => {
+        statusEl.textContent = "Ошибка загрузки купленного: " + err.message;
+      });
+    }
+
     function startEditShoppingItem(item) {
       editingShoppingId = item.id;
       shoppingTextInput.value = item.text;
+      shoppingQtyInput.value = item.quantity || "";
       shoppingAssigneeSelect.value = item.assigneeUid || "";
       shoppingFormActions.style.display = "flex";
       tg.MainButton.setText("Сохранить позицию");
@@ -1763,6 +1883,7 @@
     function resetShoppingForm() {
       editingShoppingId = null;
       shoppingTextInput.value = "";
+      shoppingQtyInput.value = "";
       shoppingAssigneeSelect.value = "";
       shoppingFormActions.style.display = "none";
       if (currentPage === "shopping") {
@@ -1789,7 +1910,13 @@
         return;
       }
 
-      const data = { text, assigneeUid: shoppingAssigneeSelect.value || null };
+      const data = {
+        text,
+        quantity: shoppingQtyInput.value.trim() || null,
+        assigneeUid: shoppingAssigneeSelect.value || null,
+        // по нему Firestore-триггер отличит «меня назначили» от «я назначил себе»
+        lastEditedBy: auth.currentUser.uid,
+      };
 
       if (editingShoppingId) {
         await updateDoc(doc(db, "shopping_items", editingShoppingId), data);
@@ -1799,13 +1926,21 @@
           status: "active",
           authorUid: auth.currentUser.uid,
           createdAt: serverTimestamp(),
-          boughtAt: null,
         });
       }
 
       resetShoppingForm();
       haptic("success");
     }
+
+    shoppingNotNeededBtn.addEventListener("click", async () => {
+      if (!editingShoppingId) return;
+      const confirmed = await confirmAction("Убрать позицию как ненужную? Её можно вернуть.");
+      if (!confirmed) return;
+      await closeShoppingItem(editingShoppingId, "cancelled");
+      resetShoppingForm();
+      haptic("success");
+    });
 
     // ---- Календарь ----
     const MONTH_NAMES = [
@@ -3428,6 +3563,7 @@
         startTasksListener();
         startClosedTasksListener();
         startShoppingListener();
+        startBoughtTodayListener();
         startEventsListener();
         startBudgetListeners();
         startPlansListeners();
