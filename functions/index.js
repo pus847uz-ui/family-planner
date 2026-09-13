@@ -766,6 +766,7 @@ async function handleConfirmCommand(botToken, message) {
 
 const TOPIC_MODULES = {
   сделать: { key: "tasks", title: "Сделать", icon: "📋" },
+  покупки: { key: "shopping", title: "Покупки", icon: "🛒" },
 };
 const BIND_RE = /^\/bind(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/is;
 
@@ -852,36 +853,98 @@ async function listFamilyUsers() {
   return snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
 }
 
+// Карточка захваченной покупки. Кнопок срока нет (у покупки его не бывает), количество
+// кнопками не задать — оно свободный текст, поэтому сообщение целиком идёт в название,
+// а количество при желании проставляется в приложении.
+function shoppingCaptureCardText(item, assigneeLabel) {
+  const lines = [`${TOPIC_MODULES.покупки.icon} Добавлено в «Покупки»`, "", `«${item.text}»`];
+  const parts = [];
+  if (item.quantity) parts.push(item.quantity);
+  if (assigneeLabel) parts.push(assigneeLabel);
+  if (parts.length > 0) lines.push(parts.join(" · "));
+  return lines.join("\n");
+}
+
+function shoppingCaptureKeyboard(itemId, familyUsers) {
+  const buttons = familyUsers.map((user) => ({
+    text: user.name || user.id,
+    callback_data: `sa:${itemId}:${user.id}`,
+  }));
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 3) {
+    rows.push(buttons.slice(i, i + 3));
+  }
+  return { inline_keyboard: rows };
+}
+
+async function refreshShoppingCaptureCard(botToken, chatId, message, itemId) {
+  const [itemSnap, familyUsers] = await Promise.all([
+    getFirestore().collection("shopping_items").doc(String(itemId)).get(),
+    listFamilyUsers(),
+  ]);
+  if (!itemSnap.exists) return;
+
+  const item = itemSnap.data();
+  const assignee = familyUsers.find((user) => user.id === item.assigneeUid);
+  await callTelegramApi(botToken, "editMessageText", {
+    chat_id: chatId,
+    message_id: message.message_id,
+    text: shoppingCaptureCardText(item, assignee ? assignee.name || assignee.id : null),
+    reply_markup: shoppingCaptureKeyboard(itemId, familyUsers),
+  });
+}
+
 async function handleTopicCapture(botToken, message) {
   const threadId = message.message_thread_id;
   const binding = await getTopicBinding(threadId);
-  if (!binding || binding.module !== "tasks") return; // тема не привязана — не наше дело
+  if (!binding) return; // тема не привязана — не наше дело
   if (!(await isFamilyMember(message.from.id))) return;
 
+  const db = getFirestore();
   const authorUid = String(message.from.id);
-  const taskRef = await getFirestore().collection("tasks").add({
-    text: message.text.trim(),
-    status: "open",
-    dueDate: null,
-    assigneeUid: null,
-    authorUid,
-    lastEditedBy: authorUid,
-    createdAt: FieldValue.serverTimestamp(),
-    reminded1Day: false,
-    remindedDueDay: false,
-  });
-
+  const text = message.text.trim();
   const familyUsers = await listFamilyUsers();
-  await sendTelegramMessage(
-    botToken,
-    message.chat.id,
-    captureCardText({ text: message.text.trim(), dueDate: null }, null),
-    {
-      message_thread_id: threadId,
-      reply_to_message_id: message.message_id,
+  const replyOptions = {
+    message_thread_id: threadId,
+    reply_to_message_id: message.message_id,
+  };
+
+  if (binding.module === "tasks") {
+    const taskRef = await db.collection("tasks").add({
+      text,
+      status: "open",
+      dueDate: null,
+      assigneeUid: null,
+      authorUid,
+      lastEditedBy: authorUid,
+      createdAt: FieldValue.serverTimestamp(),
+      reminded1Day: false,
+      remindedDueDay: false,
+    });
+
+    await sendTelegramMessage(botToken, message.chat.id, captureCardText({ text, dueDate: null }, null), {
+      ...replyOptions,
       reply_markup: captureKeyboard(taskRef.id, familyUsers),
-    }
-  );
+    });
+    return;
+  }
+
+  if (binding.module === "shopping") {
+    const itemRef = await db.collection("shopping_items").add({
+      text,
+      quantity: null,
+      status: "active",
+      assigneeUid: null,
+      authorUid,
+      lastEditedBy: authorUid,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+
+    await sendTelegramMessage(botToken, message.chat.id, shoppingCaptureCardText({ text }, null), {
+      ...replyOptions,
+      reply_markup: shoppingCaptureKeyboard(itemRef.id, familyUsers),
+    });
+  }
 }
 
 async function refreshCaptureCard(botToken, chatId, message, taskId) {
@@ -936,7 +999,7 @@ async function closeTaskCard(botToken, chatId, message, outcome) {
 
 // Нажатия по карточкам покупок. Коллекция другая, поэтому свой разбор, а не ветка в
 // handleTaskCallback — общее у них только «достать документ и проверить, чей он».
-const SHOPPING_ACTIONS = new Set(["sdone", "sdrop"]);
+const SHOPPING_ACTIONS = new Set(["sdone", "sdrop", "sa"]);
 
 async function handleShoppingCallback(botToken, callbackQuery) {
   const [action, itemId] = (callbackQuery.data || "").split(":");
@@ -955,6 +1018,22 @@ async function handleShoppingCallback(botToken, callbackQuery) {
 
   const item = itemSnap.data();
   const actorUid = String(callbackQuery.from.id);
+
+  if (action === "sa") {
+    // Карточка захвата висит в общей теме — назначать может любой из семьи, как и у задач.
+    if (!(await isFamilyMember(actorUid))) {
+      await answerCallback(botToken, callbackQuery.id, "Доступ только участникам семьи");
+      return;
+    }
+    await itemRef.update({
+      assigneeUid: callbackQuery.data.split(":")[2] || null,
+      lastEditedBy: actorUid,
+    });
+    await refreshShoppingCaptureCard(botToken, message.chat.id, message, itemId);
+    await answerCallback(botToken, callbackQuery.id, "Готово");
+    return;
+  }
+
   if (item.assigneeUid !== actorUid && item.authorUid !== actorUid) {
     await answerCallback(botToken, callbackQuery.id, "Это не ваша позиция");
     return;
