@@ -398,6 +398,16 @@
       color: var(--tg-theme-button-text-color, #ffffff);
     }
     h3 { font-size: 14px; color: var(--tg-theme-hint-color, #999999); margin: 16px 0 8px; }
+
+    .page-title { font-size: 20px; font-weight: 700; margin: 4px 0 12px; }
+    .group-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--tg-theme-hint-color, #999999);
+      margin: 18px 0 8px;
+    }
+    .group-title:first-child { margin-top: 4px; }
+    .group-title.overdue { color: var(--tg-theme-destructive-text-color, #e53935); }
   </style>
 </head>
 <body>
@@ -409,7 +419,7 @@
       <div class="home-grid">
         <button type="button" class="home-tile" data-target="tasks">
           <span class="home-tile-icon">📋</span>
-          <span class="home-tile-title">Задачи</span>
+          <span class="home-tile-title">Сделать</span>
           <span class="home-tile-stat" id="home-stat-tasks"></span>
         </button>
         <button type="button" class="home-tile" data-target="shopping">
@@ -446,6 +456,7 @@
     </section>
 
     <section id="page-tasks" class="page">
+      <div class="page-title">Сделать</div>
       <div class="quick-add">
         <input id="task-text" type="text" placeholder="Новая задача">
         <input id="task-due" type="date" title="Срок (необязательно)">
@@ -457,7 +468,8 @@
         <button type="button" id="task-delete-btn" class="text-btn danger">Удалить задачу</button>
         <button type="button" id="task-cancel-btn" class="text-btn">Отмена</button>
       </div>
-      <ul id="tasks-list" class="list"></ul>
+      <div class="period-toggle" id="task-person-filter"></div>
+      <div id="tasks-list"></div>
     </section>
 
     <section id="page-shopping" class="page">
@@ -812,6 +824,7 @@
     const taskTextInput = document.getElementById("task-text");
     const taskDueInput = document.getElementById("task-due");
     const taskAssigneeSelect = document.getElementById("task-assignee");
+    const taskPersonFilterEl = document.getElementById("task-person-filter");
     const taskFormActions = document.getElementById("task-form-actions");
     const taskDeleteBtn = document.getElementById("task-delete-btn");
     const taskCancelBtn = document.getElementById("task-cancel-btn");
@@ -1274,7 +1287,7 @@
       homeStatMealsEl.textContent = mealsToday > 0 ? `${mealsToday} сегодня` : "нет ближайших";
     }
 
-    // ---- Задачи ----
+    // ---- Сделать (коллекция в Firestore осталась `tasks`) ----
     let allFamilyUsers = [];
     let editingTaskId = null;
 
@@ -1296,6 +1309,9 @@
         populateAssigneeSelect(taskAssigneeSelect);
         populateAssigneeSelect(shoppingAssigneeSelect);
         populateAssigneeSelect(mealMenuAssigneeSelect);
+        // фильтр строится из списка участников, а список задач показывает их имена
+        renderPersonFilter();
+        renderTasksList();
       });
     }
 
@@ -1305,47 +1321,146 @@
       return user ? user.name || uid : uid;
     }
 
+    // "mine" | "all" | <uid участника>. По умолчанию "all": задача без исполнителя
+    // не попадает ни в один именной фильтр и иначе была бы не видна вообще.
+    let currentPersonFilter = "all";
+
+    function renderPersonFilter() {
+      const options = [
+        { value: "mine", label: "Мои" },
+        { value: "all", label: "Все" },
+      ];
+      allFamilyUsers
+        .filter((u) => u.id !== auth.currentUser.uid)
+        .forEach((u) => options.push({ value: u.id, label: u.name || u.id }));
+
+      // выбранного человека могли убрать из участников — не оставляем фильтр в никуда
+      if (!options.some((o) => o.value === currentPersonFilter)) currentPersonFilter = "all";
+
+      taskPersonFilterEl.innerHTML = "";
+      options.forEach((option) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "period-btn" + (option.value === currentPersonFilter ? " active" : "");
+        btn.textContent = option.label;
+        btn.addEventListener("click", () => {
+          currentPersonFilter = option.value;
+          renderPersonFilter();
+          renderTasksList();
+        });
+        taskPersonFilterEl.appendChild(btn);
+      });
+    }
+
+    function taskMatchesPersonFilter(task) {
+      if (currentPersonFilter === "all") return true;
+      if (currentPersonFilter === "mine") return task.assigneeUid === auth.currentUser.uid;
+      return task.assigneeUid === currentPersonFilter;
+    }
+
+    // Порядок групп фиксированный, пустые не показываются.
+    function groupTasksByDue(tasks) {
+      const today = localDateStr(new Date());
+      const tomorrow = localDateStr(new Date(Date.now() + 86400000));
+      const groups = [
+        { key: "overdue", title: "Просрочено", items: [] },
+        { key: "today", title: "Сегодня", items: [] },
+        { key: "tomorrow", title: "Завтра", items: [] },
+        { key: "later", title: "Позже", items: [] },
+        { key: "nodate", title: "Без срока", items: [] },
+      ];
+      const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
+
+      tasks.forEach((task) => {
+        if (!task.dueDate) byKey.nodate.items.push(task);
+        else if (task.dueDate < today) byKey.overdue.items.push(task);
+        else if (task.dueDate === today) byKey.today.items.push(task);
+        else if (task.dueDate === tomorrow) byKey.tomorrow.items.push(task);
+        else byKey.later.items.push(task);
+      });
+
+      groups.forEach((group) => {
+        group.items.sort((a, b) => {
+          const byDue = (a.dueDate || "").localeCompare(b.dueDate || "");
+          if (byDue !== 0) return byDue;
+          return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+        });
+      });
+
+      return groups.filter((group) => group.items.length > 0);
+    }
+
+    function buildTaskRow(task, groupKey) {
+      const li = document.createElement("li");
+      li.className = "event-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.addEventListener("click", (e) => e.stopPropagation());
+      checkbox.addEventListener("change", async () => {
+        haptic();
+        await updateDoc(doc(db, "tasks", task.id), { status: "done" });
+      });
+
+      const text = document.createElement("span");
+      text.className = "text";
+      text.textContent = task.text;
+
+      li.appendChild(checkbox);
+      li.appendChild(text);
+
+      const meta = [];
+      // в группах "Сегодня"/"Завтра" дата дублирует заголовок группы
+      if (task.dueDate && groupKey !== "today" && groupKey !== "tomorrow") meta.push(task.dueDate);
+      // имя исполнителя нужно только там, где в списке смешаны разные люди
+      if (currentPersonFilter === "all" && task.assigneeUid) meta.push(assigneeName(task.assigneeUid));
+      if (meta.length > 0) {
+        const due = document.createElement("span");
+        due.className = "due";
+        due.textContent = meta.join(" · ");
+        li.appendChild(due);
+      }
+
+      li.addEventListener("click", () => startEditTask(task));
+      return li;
+    }
+
+    function emptyListMessage() {
+      if (currentPersonFilter === "all") return "Пока пусто — добавьте первую задачу";
+      if (currentPersonFilter === "mine") return "На вас ничего не назначено";
+      const user = allFamilyUsers.find((u) => u.id === currentPersonFilter);
+      return `На ${user ? user.name || user.id : "участника"} ничего не назначено`;
+    }
+
+    function renderTasksList() {
+      tasksList.innerHTML = "";
+      const visible = cachedTasks.filter(taskMatchesPersonFilter);
+
+      if (visible.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = emptyListMessage();
+        tasksList.appendChild(empty);
+        return;
+      }
+
+      groupTasksByDue(visible).forEach((group) => {
+        const title = document.createElement("div");
+        title.className = "group-title" + (group.key === "overdue" ? " overdue" : "");
+        title.textContent = group.title;
+        tasksList.appendChild(title);
+
+        const ul = document.createElement("ul");
+        ul.className = "list";
+        group.items.forEach((task) => ul.appendChild(buildTaskRow(task, group.key)));
+        tasksList.appendChild(ul);
+      });
+    }
+
     function renderTasks(snapshot) {
       cachedTasks = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       updateHomeStats();
-
-      tasksList.innerHTML = "";
-      if (snapshot.empty) {
-        tasksList.innerHTML = '<li class="empty" style="background:none;">Пока пусто — добавьте первую задачу</li>';
-        return;
-      }
-      cachedTasks.forEach((task) => {
-        const li = document.createElement("li");
-        li.className = "event-row";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.addEventListener("click", (e) => e.stopPropagation());
-        checkbox.addEventListener("change", async () => {
-          haptic();
-          await updateDoc(doc(db, "tasks", task.id), { status: "done" });
-        });
-
-        const text = document.createElement("span");
-        text.className = "text";
-        text.textContent = task.text;
-
-        li.appendChild(checkbox);
-        li.appendChild(text);
-
-        const meta = [];
-        if (task.dueDate) meta.push(task.dueDate);
-        if (task.assigneeUid) meta.push(assigneeName(task.assigneeUid));
-        if (meta.length > 0) {
-          const due = document.createElement("span");
-          due.className = "due";
-          due.textContent = meta.join(" · ");
-          li.appendChild(due);
-        }
-
-        li.addEventListener("click", () => startEditTask(task));
-        tasksList.appendChild(li);
-      });
+      renderTasksList();
     }
 
     function startTasksListener() {
