@@ -400,6 +400,19 @@
     h3 { font-size: 14px; color: var(--tg-theme-hint-color, #999999); margin: 16px 0 8px; }
 
     .page-title { font-size: 20px; font-weight: 700; margin: 4px 0 12px; }
+    .person-chip {
+      padding: 8px 14px;
+      border-radius: 20px;
+      border: none;
+      font-size: 14px;
+      background: var(--tg-theme-bg-color, #ffffff);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    .person-chip.active {
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+    .field-label { font-size: 13px; color: var(--tg-theme-hint-color, #999999); }
     .group-title {
       font-size: 13px;
       font-weight: 600;
@@ -526,6 +539,8 @@
           <input id="event-location" type="url" placeholder="Ссылка на карту (необязательно)">
           <button type="button" id="event-pick-location-btn">📍 Карта</button>
         </div>
+        <div class="field-label">Кого касается</div>
+        <div class="option-chips" id="event-participants"></div>
         <div class="form-actions" id="event-form-actions" style="display: none;">
           <button type="button" class="text-btn danger" id="event-delete-btn">Удалить событие</button>
           <button type="button" class="text-btn" id="event-cancel-btn">Отмена</button>
@@ -877,6 +892,7 @@
     const eventPlaceInput = document.getElementById("event-place");
     const eventLocationInput = document.getElementById("event-location");
     const eventPickLocationBtn = document.getElementById("event-pick-location-btn");
+    const eventParticipantsEl = document.getElementById("event-participants");
     const mapModal = document.getElementById("map-modal");
     const mapModalClose = document.getElementById("map-modal-close");
     const mapSearchInput = document.getElementById("map-search-input");
@@ -1355,6 +1371,8 @@
         renderTasksList();
         renderShoppingPersonFilter();
         renderShoppingList();
+        renderEventParticipants();
+        renderAgenda();
       });
     }
 
@@ -1959,6 +1977,31 @@
     calendarViewDate.setDate(1);
     let selectedDate = new Date(); // выбранный день (для повестки снизу)
     let editingEventId = null; // id события, которое сейчас редактируется, или null (режим добавления)
+    let selectedEventParticipants = []; // uid'ы тех, кого касается событие; пусто = всех
+
+    function renderEventParticipants() {
+      eventParticipantsEl.innerHTML = "";
+      allFamilyUsers.forEach((user) => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className =
+          "person-chip" + (selectedEventParticipants.includes(user.id) ? " active" : "");
+        chip.textContent = user.name || user.id;
+        chip.addEventListener("click", () => {
+          selectedEventParticipants = selectedEventParticipants.includes(user.id)
+            ? selectedEventParticipants.filter((id) => id !== user.id)
+            : [...selectedEventParticipants, user.id];
+          renderEventParticipants();
+          haptic();
+        });
+        eventParticipantsEl.appendChild(chip);
+      });
+    }
+
+    function participantNames(uids) {
+      if (!uids || uids.length === 0) return null;
+      return uids.map((uid) => assigneeName(uid)).filter(Boolean).join(", ");
+    }
 
     function eventsOnDate(dateObj) {
       const key = localDateStr(dateObj);
@@ -2048,6 +2091,8 @@
         if (ev.endTime && !multiDay) whenText += "–" + ev.endTime;
         if (multiDay) whenText += " → " + ev.endDate;
         if (ev.place) whenText += " · " + ev.place;
+        const who = participantNames(ev.participantUids);
+        if (who) whenText += " · " + who;
         when.textContent = whenText;
 
         li.appendChild(text);
@@ -2100,6 +2145,8 @@
       eventEndTimeInput.value = ev.endTime || "";
       eventPlaceInput.value = ev.place || "";
       eventLocationInput.value = ev.locationUrl || "";
+      selectedEventParticipants = ev.participantUids ? [...ev.participantUids] : [];
+      renderEventParticipants();
       eventFormActions.style.display = "flex";
       tg.MainButton.setText("Сохранить изменения");
       tg.BackButton.show();
@@ -2115,6 +2162,8 @@
       eventEndTimeInput.value = "";
       eventPlaceInput.value = "";
       eventLocationInput.value = "";
+      selectedEventParticipants = [];
+      renderEventParticipants();
       eventFormActions.style.display = "none";
       tg.MainButton.setText(pages.calendar.mainButtonText);
     }
@@ -2162,6 +2211,8 @@
         endTime,
         place: eventPlaceInput.value.trim() || null,
         locationUrl: eventLocationInput.value.trim() || null,
+        participantUids: selectedEventParticipants.slice(),
+        lastEditedBy: auth.currentUser.uid,
         startAt,
         // сбрасываем флаги напоминаний — если время события изменилось, напоминания должны прийти заново
         reminded1Day: false,

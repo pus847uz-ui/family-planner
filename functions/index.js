@@ -264,6 +264,79 @@ exports.onShoppingUpdated = onDocumentUpdated(
   }
 );
 
+// ---- Уведомления об участии в событии ----
+// В отличие от задач и покупок, участников может быть несколько, поэтому уведомляем всех,
+// кого добавили, кроме того, кто сам это сделал.
+
+function eventWhenText(eventItem) {
+  const date = formatDueDate(eventItem.startDate);
+  const time = eventItem.startTime || "весь день";
+  return `${date} ${time}`;
+}
+
+function eventNotificationMessage(eventItem, actorName, isNew) {
+  const lines = [
+    isNew ? "📅 Новое событие" : "📅 Вас добавили в событие",
+    "",
+    `«${eventItem.title}»`,
+    eventWhenText(eventItem),
+  ];
+  if (eventItem.place) lines.push(`Место: ${eventItem.place}`);
+  lines.push(`Добавил: ${actorName}`);
+  return lines.join("\n");
+}
+
+function eventKeyboard(eventItem) {
+  // Ссылка на карту — обычной url-кнопкой; никаких действий над событием «нажатием» нет,
+  // завершать или переносить его как задачу бессмысленно.
+  if (!eventItem.locationUrl) return undefined;
+  return { inline_keyboard: [[{ text: "📍 Место на карте", url: eventItem.locationUrl }]] };
+}
+
+async function notifyEventParticipants(botToken, eventItem, recipients, actorUid, isNew) {
+  if (recipients.length === 0) return;
+  const actorName = await getUserName(actorUid);
+  const text = eventNotificationMessage(eventItem, actorName, isNew);
+  const keyboard = eventKeyboard(eventItem);
+
+  await Promise.all(
+    recipients.map((uid) =>
+      sendTelegramMessage(botToken, uid, text, keyboard ? { reply_markup: keyboard } : {})
+    )
+  );
+}
+
+exports.onEventCreated = onDocumentCreated(
+  { document: "events/{eventId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const eventItem = event.data.data();
+    const participants = eventItem.participantUids || [];
+    if (participants.length === 0) return; // «касается всех» — отдельно никому не пишем
+
+    const actorUid = eventItem.lastEditedBy || eventItem.authorUid;
+    const recipients = participants.filter((uid) => uid !== actorUid);
+    await notifyEventParticipants(BOT_TOKEN.value(), eventItem, recipients, actorUid, true);
+  }
+);
+
+exports.onEventUpdated = onDocumentUpdated(
+  { document: "events/{eventId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    const wasParticipants = before.participantUids || [];
+    const nowParticipants = after.participantUids || [];
+
+    // Пишем только тем, кого добавили именно этой правкой: иначе каждое изменение места
+    // или времени рассылало бы «вас добавили» всем по кругу.
+    const actorUid = after.lastEditedBy || after.authorUid;
+    const added = nowParticipants.filter(
+      (uid) => !wasParticipants.includes(uid) && uid !== actorUid
+    );
+    await notifyEventParticipants(BOT_TOKEN.value(), after, added, actorUid, false);
+  }
+);
+
 // ---- Вечерний разбор «сделано или нет» ----
 // Сводка за день плюс отдельная карточка на каждую незакрытую задачу: по ней сразу можно
 // отчитаться, перенести срок или закрыть как ненужную, не открывая приложение.
@@ -520,8 +593,15 @@ exports.sendEventReminders = onSchedule(
       }
 
       if (messageText) {
+        // Кого касается событие. Пусто (в том числе у событий, созданных до появления
+        // участников) — значит всех, как было раньше.
+        const recipients =
+          eventItem.participantUids && eventItem.participantUids.length > 0
+            ? eventItem.participantUids
+            : chatIds;
+
         await Promise.all(
-          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
+          recipients.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
         );
         await eventDoc.ref.update(updates);
       }
