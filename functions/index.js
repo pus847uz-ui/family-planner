@@ -133,7 +133,15 @@ function sortByDueDate(a, b) {
   return (a.dueDate || "").localeCompare(b.dueDate || "");
 }
 
-function morningSummaryText(overdue, dueToday) {
+function pluralRu(count, one, few, many) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+function morningSummaryText(overdue, dueToday, shoppingTotal, shoppingMine) {
   const lines = ["☀️ На сегодня:"];
   if (overdue.length > 0) {
     lines.push("", "🔴 Просрочено:");
@@ -142,6 +150,15 @@ function morningSummaryText(overdue, dueToday) {
   if (dueToday.length > 0) {
     lines.push("", "📋 Сегодня:");
     dueToday.forEach((task) => lines.push(`• ${task.text}`));
+  }
+  if (shoppingTotal > 0) {
+    const word = pluralRu(shoppingTotal, "позиция", "позиции", "позиций");
+    lines.push(
+      "",
+      shoppingMine > 0
+        ? `🛒 В списке покупок ${shoppingTotal} ${word}, из них на вас ${shoppingMine}`
+        : `🛒 В списке покупок ${shoppingTotal} ${word}`
+    );
   }
   return lines.join("\n");
 }
@@ -152,24 +169,98 @@ exports.sendMorningTaskSummary = onSchedule(
     const db = getFirestore();
     const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
 
-    const [tasksSnap, usersSnap] = await Promise.all([
+    const [tasksSnap, shoppingSnap, usersSnap] = await Promise.all([
       db.collection("tasks").where("status", "==", "open").get(),
+      db.collection("shopping_items").where("status", "==", "active").get(),
       db.collection("users").get(),
     ]);
     const openTasks = tasksSnap.docs.map((d) => d.data());
+    const activeShopping = shoppingSnap.docs.map((d) => d.data());
 
     for (const userDoc of usersSnap.docs) {
       const uid = userDoc.id;
       const mine = openTasks.filter(
         (task) => task.assigneeUid === uid && task.dueDate && task.dueDate <= today
       );
-      if (mine.length === 0) continue;
+      const myShopping = activeShopping.filter((item) => item.assigneeUid === uid);
+
+      // Лично на человека ничего не назначено — не пишем вовсе, даже если общий список
+      // покупок не пуст: сводка личная, а не «что вообще есть в семье».
+      if (mine.length === 0 && myShopping.length === 0) continue;
 
       const overdue = mine.filter((task) => task.dueDate < today).sort(sortByDueDate);
       const dueToday = mine.filter((task) => task.dueDate === today).sort(sortByDueDate);
 
-      await sendTelegramMessage(BOT_TOKEN.value(), uid, morningSummaryText(overdue, dueToday));
+      await sendTelegramMessage(
+        BOT_TOKEN.value(),
+        uid,
+        morningSummaryText(overdue, dueToday, activeShopping.length, myShopping.length)
+      );
     }
+  }
+);
+
+// ---- Уведомления о назначении покупки ----
+// Та же схема, что у задач: триггер, а не код мини-аппа, чтобы одинаково срабатывало и при
+// вводе из приложения, и при вводе из темы. Кнопки переноса здесь нет — у покупки нет срока.
+
+function shoppingActionsKeyboard(itemId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Купил", callback_data: `sdone:${itemId}` },
+        { text: "🚫 Не нужно", callback_data: `sdrop:${itemId}` },
+      ],
+    ],
+  };
+}
+
+function shoppingAssignmentMessage(item, assignerName, isReassignment) {
+  const lines = [
+    isReassignment ? "🛒 На вас переназначена покупка" : "🛒 На вас назначена покупка",
+    "",
+    `«${item.text}»`,
+  ];
+  if (item.quantity) lines.push(`Количество: ${item.quantity}`);
+  lines.push(`Назначил: ${assignerName}`);
+  return lines.join("\n");
+}
+
+exports.onShoppingCreated = onDocumentCreated(
+  { document: "shopping_items/{itemId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const item = event.data.data();
+    if (!item.assigneeUid) return;
+    if (item.assigneeUid === item.authorUid) return; // назначил покупку сам себе
+
+    const assignerName = await getUserName(item.authorUid);
+    await sendTelegramMessage(
+      BOT_TOKEN.value(),
+      item.assigneeUid,
+      shoppingAssignmentMessage(item, assignerName, false),
+      { reply_markup: shoppingActionsKeyboard(event.params.itemId) }
+    );
+  }
+);
+
+exports.onShoppingUpdated = onDocumentUpdated(
+  { document: "shopping_items/{itemId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!after.assigneeUid) return;
+    if (before.assigneeUid === after.assigneeUid) return; // исполнитель не менялся
+
+    const actorUid = after.lastEditedBy || after.authorUid;
+    if (after.assigneeUid === actorUid) return; // переназначил на себя
+
+    const assignerName = await getUserName(actorUid);
+    await sendTelegramMessage(
+      BOT_TOKEN.value(),
+      after.assigneeUid,
+      shoppingAssignmentMessage(after, assignerName, true),
+      { reply_markup: shoppingActionsKeyboard(event.params.itemId) }
+    );
   }
 );
 
@@ -843,6 +934,46 @@ async function closeTaskCard(botToken, chatId, message, outcome) {
   });
 }
 
+// Нажатия по карточкам покупок. Коллекция другая, поэтому свой разбор, а не ветка в
+// handleTaskCallback — общее у них только «достать документ и проверить, чей он».
+const SHOPPING_ACTIONS = new Set(["sdone", "sdrop"]);
+
+async function handleShoppingCallback(botToken, callbackQuery) {
+  const [action, itemId] = (callbackQuery.data || "").split(":");
+  const message = callbackQuery.message;
+  if (!message || !message.chat) {
+    await answerCallback(botToken, callbackQuery.id, "Сообщение слишком старое, откройте список в приложении");
+    return;
+  }
+
+  const itemRef = getFirestore().collection("shopping_items").doc(String(itemId));
+  const itemSnap = await itemRef.get();
+  if (!itemSnap.exists) {
+    await answerCallback(botToken, callbackQuery.id, "Позиция уже удалена");
+    return;
+  }
+
+  const item = itemSnap.data();
+  const actorUid = String(callbackQuery.from.id);
+  if (item.assigneeUid !== actorUid && item.authorUid !== actorUid) {
+    await answerCallback(botToken, callbackQuery.id, "Это не ваша позиция");
+    return;
+  }
+
+  const bought = action === "sdone";
+  await itemRef.update({
+    status: bought ? "bought" : "cancelled",
+    closedAt: FieldValue.serverTimestamp(),
+  });
+  await closeTaskCard(
+    botToken,
+    message.chat.id,
+    message,
+    bought ? "✅ Куплено" : "🚫 Убрано как ненужное"
+  );
+  await answerCallback(botToken, callbackQuery.id, bought ? "Куплено" : "Убрано");
+}
+
 async function handleTaskCallback(botToken, callbackQuery) {
   const [action, taskId] = (callbackQuery.data || "").split(":");
   if (!taskId) return;
@@ -952,7 +1083,12 @@ exports.telegramWebhook = onRequest(
 
     try {
       if (callbackQuery) {
-        await handleTaskCallback(BOT_TOKEN.value(), callbackQuery);
+        const action = (callbackQuery.data || "").split(":")[0];
+        if (SHOPPING_ACTIONS.has(action)) {
+          await handleShoppingCallback(BOT_TOKEN.value(), callbackQuery);
+        } else {
+          await handleTaskCallback(BOT_TOKEN.value(), callbackQuery);
+        }
       } else if (message && message.text && message.chat.type === "private" && START_RE.test(message.text)) {
         await handleStartCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && CONFIRM_RE.test(message.text)) {
