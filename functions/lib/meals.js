@@ -24,12 +24,16 @@ const MEAL_STATUS = {
   ASKING_PLACE: "asking_place",
   AT_HOME: "at_home",
   DECIDING: "deciding",
+  DECIDED: "decided",
 };
 
-const MEAL_ACTIONS = new Set(["mlnew", "ml"]);
+const MEAL_ACTIONS = new Set(["mlnew", "ml", "mlp"]);
 // Кириллические команды Telegram не принимает, поэтому `/meal` латиницей, а шаблоны
 // под ней — по-русски.
 const MEAL_RE = /^\/meal(?:@[A-Za-z0-9_]+)?$/i;
+// Отдельная команда, а не `/confirm`: та уже закрепляет бронирования в темах поездок,
+// и одно слово на два разных действия в соседних темах — источник путаницы.
+const MEAL_OK_RE = /^\/ok(?:@[A-Za-z0-9_]+)?$/i;
 
 function mealTemplatesKeyboard() {
   return {
@@ -64,7 +68,13 @@ function mealSessionCardText(session, names) {
   } else if (session.status === MEAL_STATUS.AT_HOME) {
     lines.push(`Дома? — ${names.responder}: Дома`, "", "Сессия закрыта, запись добавлена в приложение.");
   } else if (session.status === MEAL_STATUS.DECIDING) {
-    lines.push(`Дома? — ${names.responder}: Не дома`, "", "Где едим? Пишите варианты в тему.");
+    lines.push(
+      `Дома? — ${names.responder}: Не дома`,
+      "",
+      "Где едим? Пишите варианты в тему, затем ответьте на нужное командой /ok."
+    );
+  } else if (session.status === MEAL_STATUS.DECIDED) {
+    lines.push(`Дома? — ${names.responder}: Не дома`, "", `📌 Решено: «${session.decidedPlace}»`);
   }
 
   return lines.join("\n");
@@ -164,6 +174,79 @@ async function startMealSession(botToken, callbackQuery, mealType) {
   });
 }
 
+// `/ok` ответом на сообщение с вариантом. Тот же приём, что закрепление бронирований в
+// поездках: бот не гадает из переписки, о чём договорились, — человек показывает пальцем.
+async function handleMealOkCommand(botToken, message) {
+  const threadId = message.message_thread_id;
+  if (!(await isFamilyMember(message.from.id))) return;
+
+  const replyOptions = { message_thread_id: threadId, reply_to_message_id: message.message_id };
+
+  if (!message.reply_to_message) {
+    await sendTelegramMessage(
+      botToken,
+      message.chat.id,
+      "Чтобы утвердить вариант, ответьте командой /ok на сообщение с ним.",
+      replyOptions
+    );
+    return;
+  }
+
+  // Самая свежая обсуждаемая сессия в этой теме. Нескольких одновременно почти не
+  // бывает, но бот всё равно называет приём пищи вслух — если промахнулись, это видно.
+  const sessionsSnap = await getFirestore()
+    .collection("meal_sessions")
+    .where("chatId", "==", message.chat.id)
+    .where("threadId", "==", threadId || null)
+    .where("status", "==", MEAL_STATUS.DECIDING)
+    .get();
+
+  if (sessionsSnap.empty) {
+    await sendTelegramMessage(
+      botToken,
+      message.chat.id,
+      "Сейчас нечего утверждать — нет открытого обсуждения. Начните с /meal.",
+      replyOptions
+    );
+    return;
+  }
+
+  const newest = sessionsSnap.docs
+    .slice()
+    .sort((a, b) => (b.data().createdAt?.toMillis() || 0) - (a.data().createdAt?.toMillis() || 0))[0];
+  const session = newest.data();
+
+  const place = (message.reply_to_message.text || message.reply_to_message.caption || "").trim();
+  if (!place) {
+    await sendTelegramMessage(botToken, message.chat.id, "В этом сообщении нет текста.", replyOptions);
+    return;
+  }
+
+  const proposerUid = String(message.from.id);
+  const proposerName = await getUserName(proposerUid);
+  const meal = MEAL_TYPES[session.mealType];
+
+  const sent = await callTelegramApi(botToken, "sendMessage", {
+    chat_id: message.chat.id,
+    message_thread_id: threadId,
+    text: `${proposerName} предлагает на ${meal.title.toLowerCase()}: «${place}»\nСогласны?`,
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "Да", callback_data: `mlp:${newest.id}:yes` },
+          { text: "Нет", callback_data: `mlp:${newest.id}:no` },
+        ],
+      ],
+    },
+  });
+
+  await newest.ref.update({
+    proposedPlace: place,
+    proposedByUid: proposerUid,
+    proposalMessageId: sent.ok ? sent.result.message_id : null,
+  });
+}
+
 // Запись в приложение. `createdFrom` не даёт onPlanCreated завести отдельную тему
 // обсуждения: обсуждение уже прошло здесь, вторая тема на тот же ужин — мусор.
 async function createMealPlan(session, decidedPlace) {
@@ -186,6 +269,58 @@ async function createMealPlan(session, decidedPlace) {
     createdAt: FieldValue.serverTimestamp(),
   });
   return planRef.id;
+}
+
+// Куда возвращает «Передумали» с каждого шага. Таблицей, а не условием: «нет» и «дома»
+// закрывают сессию с разных вопросов, и одна формула на оба давала бы откат не туда.
+const UNDO_TARGET = {
+  [MEAL_STATUS.DECLINED]: MEAL_STATUS.ASKING,
+  [MEAL_STATUS.ASKING_PLACE]: MEAL_STATUS.ASKING,
+  [MEAL_STATUS.AT_HOME]: MEAL_STATUS.ASKING_PLACE,
+  [MEAL_STATUS.DECIDING]: MEAL_STATUS.ASKING_PLACE,
+  [MEAL_STATUS.DECIDED]: MEAL_STATUS.DECIDING,
+};
+
+async function handleProposalAnswer(botToken, callbackQuery, sessionRef, session, sessionId, answer) {
+  const actorUid = String(callbackQuery.from.id);
+  const message = callbackQuery.message;
+
+  if (session.status !== MEAL_STATUS.DECIDING) {
+    await answerCallback(botToken, callbackQuery.id, "Это обсуждение уже закрыто");
+    return;
+  }
+
+  // Согласие обоих: предложивший за себя не решает.
+  if (actorUid === session.proposedByUid) {
+    const other = await getUserName(
+      session.proposedByUid === session.initiatorUid ? session.responderUid : session.initiatorUid
+    );
+    await answerCallback(botToken, callbackQuery.id, `Предложение ваше — согласие за ${other}`);
+    return;
+  }
+
+  const place = session.proposedPlace;
+  const agreed = answer === "yes";
+  const updates = agreed
+    ? {
+        status: MEAL_STATUS.DECIDED,
+        decidedPlace: place,
+        decidedByUid: actorUid,
+        planId: await createMealPlan(session, place),
+      }
+    : { proposedPlace: null, proposedByUid: null, proposalMessageId: null };
+
+  await sessionRef.update(updates);
+
+  await callTelegramApi(botToken, "editMessageText", {
+    chat_id: message.chat.id,
+    message_id: message.message_id,
+    text: agreed ? `✅ Согласовано: «${place}»` : `❌ «${place}» не подошло, обсуждаем дальше`,
+    reply_markup: { inline_keyboard: [] },
+  });
+
+  await refreshMealCard(botToken, { ...session, ...updates }, sessionId);
+  await answerCallback(botToken, callbackQuery.id, agreed ? "Решено" : "Обсуждаем дальше");
 }
 
 async function handleMealCallback(botToken, callbackQuery) {
@@ -211,12 +346,32 @@ async function handleMealCallback(botToken, callbackQuery) {
   }
   const session = sessionSnap.data();
 
+  if (action === "mlp") {
+    await handleProposalAnswer(botToken, callbackQuery, sessionRef, session, arg, answer);
+    return;
+  }
+
   if (answer === "undo") {
-    // Откат на шаг назад: закрытая сессия снова открыта, обсуждаемая возвращается к вопросу
-    const previous =
-      session.status === MEAL_STATUS.ASKING_PLACE ? MEAL_STATUS.ASKING : MEAL_STATUS.ASKING_PLACE;
+    const previous = UNDO_TARGET[session.status];
+    if (!previous) {
+      await answerCallback(botToken, callbackQuery.id, "Отсюда откатывать нечего");
+      return;
+    }
+
     const updates = { status: previous };
     if (previous === MEAL_STATUS.ASKING) updates.responderUid = null;
+
+    // Ветки «дома» и «решено» успели завести запись в приложении — решение отменяют
+    // вместе с ней, иначе в «Приёмах пищи» останется ужин, от которого отказались.
+    if (session.planId) {
+      await getFirestore().collection("plans").doc(session.planId).delete();
+      updates.planId = null;
+    }
+    if (session.status === MEAL_STATUS.DECIDED) {
+      updates.decidedPlace = null;
+      updates.decidedByUid = null;
+    }
+
     await sessionRef.update(updates);
     await refreshMealCard(botToken, { ...session, ...updates }, arg);
     await answerCallback(botToken, callbackQuery.id, "Вернулись на шаг назад");
@@ -254,6 +409,8 @@ module.exports = {
   MEAL_STATUS,
   MEAL_ACTIONS,
   MEAL_RE,
+  MEAL_OK_RE,
+  handleMealOkCommand,
   mealTemplatesKeyboard,
   mealSessionCardText,
   mealSessionKeyboard,

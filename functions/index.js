@@ -47,7 +47,14 @@ const { notifyEventParticipants, EVENT_ACTIONS, handleEventCallback } = require(
 const { PLAN_TYPES, PLAN_TYPE_EMOJI, PLAN_TYPE_TITLE, isClosedStatus } = require("./lib/plans");
 const { BIND_RE, handleBindCommand, handleTopicCapture } = require("./lib/topics");
 const { START_RE, CONFIRM_RE, handleStartCommand, handleConfirmCommand } = require("./lib/bot");
-const { MEAL_RE, MEAL_ACTIONS, handleMealCommand, handleMealCallback } = require("./lib/meals");
+const {
+  MEAL_RE,
+  MEAL_OK_RE,
+  MEAL_ACTIONS,
+  handleMealCommand,
+  handleMealOkCommand,
+  handleMealCallback,
+} = require("./lib/meals");
 
 exports.verifyInitData = onRequest(
   { secrets: [BOT_TOKEN], cors: true },
@@ -539,6 +546,8 @@ exports.telegramWebhook = onRequest(
         await handleBindCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && MEAL_RE.test(message.text)) {
         await handleMealCommand(BOT_TOKEN.value(), message);
+      } else if (message && message.text && MEAL_OK_RE.test(message.text)) {
+        await handleMealOkCommand(BOT_TOKEN.value(), message);
       } else if (
         message &&
         message.text &&
