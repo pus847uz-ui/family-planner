@@ -464,12 +464,24 @@
       <select id="task-assignee" style="width: 100%; margin-bottom: 12px;">
         <option value="">Не назначено</option>
       </select>
-      <div class="form-actions" id="task-form-actions" style="display: none;">
-        <button type="button" id="task-delete-btn" class="text-btn danger">Удалить задачу</button>
-        <button type="button" id="task-cancel-btn" class="text-btn">Отмена</button>
+      <div id="task-form-actions" style="display: none;">
+        <div class="form-actions">
+          <button type="button" id="task-postpone-tomorrow-btn" class="text-btn">⏰ Завтра</button>
+          <button type="button" id="task-postpone-week-btn" class="text-btn">⏰ +7 дней</button>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="task-notneeded-btn" class="text-btn">🚫 Не нужно</button>
+          <button type="button" id="task-delete-btn" class="text-btn danger">Удалить</button>
+          <button type="button" id="task-cancel-btn" class="text-btn">Отмена</button>
+        </div>
       </div>
       <div class="period-toggle" id="task-person-filter"></div>
       <div id="tasks-list"></div>
+
+      <div id="tasks-closed-section" style="display: none;">
+        <div class="group-title">Закрыто сегодня</div>
+        <ul id="tasks-closed-list" class="list"></ul>
+      </div>
     </section>
 
     <section id="page-shopping" class="page">
@@ -828,6 +840,11 @@
     const taskFormActions = document.getElementById("task-form-actions");
     const taskDeleteBtn = document.getElementById("task-delete-btn");
     const taskCancelBtn = document.getElementById("task-cancel-btn");
+    const taskNotNeededBtn = document.getElementById("task-notneeded-btn");
+    const taskPostponeTomorrowBtn = document.getElementById("task-postpone-tomorrow-btn");
+    const taskPostponeWeekBtn = document.getElementById("task-postpone-week-btn");
+    const tasksClosedSection = document.getElementById("tasks-closed-section");
+    const tasksClosedList = document.getElementById("tasks-closed-list");
     const shoppingTextInput = document.getElementById("shopping-text");
     const shoppingAssigneeSelect = document.getElementById("shopping-assignee");
     const shoppingFormActions = document.getElementById("shopping-form-actions");
@@ -1290,6 +1307,7 @@
     // ---- Сделать (коллекция в Firestore осталась `tasks`) ----
     let allFamilyUsers = [];
     let editingTaskId = null;
+    let cachedClosedToday = [];
 
     function populateAssigneeSelect(selectEl) {
       const currentValue = selectEl.value;
@@ -1399,7 +1417,7 @@
       checkbox.addEventListener("click", (e) => e.stopPropagation());
       checkbox.addEventListener("change", async () => {
         haptic();
-        await updateDoc(doc(db, "tasks", task.id), { status: "done" });
+        await closeTask(task.id, "done");
       });
 
       const text = document.createElement("span");
@@ -1474,12 +1492,109 @@
       });
     }
 
+    // ---- Закрытие, возврат и перенос срока ----
+    // Одно поле `closedAt` на оба закрывающих статуса: по нему же строится запрос
+    // «Закрыто сегодня» — диапазон по одному полю обходится автоматическим индексом,
+    // без составного и без фильтра по статусу.
+    async function closeTask(taskId, status) {
+      await updateDoc(doc(db, "tasks", taskId), {
+        status,
+        closedAt: serverTimestamp(),
+      });
+    }
+
+    async function reopenTask(taskId) {
+      await updateDoc(doc(db, "tasks", taskId), {
+        status: "open",
+        closedAt: null,
+        // задача снова живая — напоминания по ней должны сработать заново
+        reminded1Day: false,
+        remindedDueDay: false,
+      });
+    }
+
+    function startOfTodayDate() {
+      return new Date(localDateStr(new Date()) + "T00:00:00");
+    }
+
+    function renderClosedToday() {
+      tasksClosedSection.style.display = cachedClosedToday.length > 0 ? "block" : "none";
+      tasksClosedList.innerHTML = "";
+
+      cachedClosedToday.forEach((task) => {
+        const li = document.createElement("li");
+
+        const icon = document.createElement("span");
+        icon.textContent = task.status === "done" ? "✅" : "🚫";
+
+        const text = document.createElement("span");
+        text.className = "text";
+        text.textContent = task.text;
+
+        const back = document.createElement("button");
+        back.type = "button";
+        back.className = "text-btn";
+        back.style.flex = "0 0 auto";
+        back.textContent = "Вернуть";
+        back.addEventListener("click", async () => {
+          await reopenTask(task.id);
+          haptic("success");
+        });
+
+        li.appendChild(icon);
+        li.appendChild(text);
+        li.appendChild(back);
+        tasksClosedList.appendChild(li);
+      });
+    }
+
+    function startClosedTasksListener() {
+      const closedQuery = query(
+        collection(db, "tasks"),
+        where("closedAt", ">=", startOfTodayDate()),
+        orderBy("closedAt", "desc")
+      );
+      onSnapshot(closedQuery, (snapshot) => {
+        cachedClosedToday = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderClosedToday();
+      }, (err) => {
+        statusEl.textContent = "Ошибка загрузки закрытых задач: " + err.message;
+      });
+    }
+
+    function shiftedDateStr(days) {
+      const base = taskDueInput.value ? new Date(taskDueInput.value + "T00:00:00") : new Date();
+      base.setDate(base.getDate() + days);
+      return localDateStr(base);
+    }
+
+    // Перенос считается от текущего срока задачи, а не от сегодняшнего дня: «+7 дней»
+    // у просроченной задачи должен сдвинуть её вперёд от даты, которая уже стоит.
+    // Исключение — «Завтра»: это всегда завтрашний день, независимо от старого срока.
+    taskPostponeTomorrowBtn.addEventListener("click", () => {
+      taskDueInput.value = localDateStr(new Date(Date.now() + 86400000));
+      haptic();
+    });
+    taskPostponeWeekBtn.addEventListener("click", () => {
+      taskDueInput.value = shiftedDateStr(7);
+      haptic();
+    });
+
+    taskNotNeededBtn.addEventListener("click", async () => {
+      if (!editingTaskId) return;
+      const confirmed = await confirmAction("Закрыть задачу как ненужную? Её можно вернуть.");
+      if (!confirmed) return;
+      await closeTask(editingTaskId, "cancelled");
+      resetTaskForm();
+      haptic("success");
+    });
+
     function startEditTask(task) {
       editingTaskId = task.id;
       taskTextInput.value = task.text;
       taskDueInput.value = task.dueDate || "";
       taskAssigneeSelect.value = task.assigneeUid || "";
-      taskFormActions.style.display = "flex";
+      taskFormActions.style.display = "block";
       tg.MainButton.setText("Сохранить задачу");
       tg.BackButton.show();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1519,6 +1634,10 @@
         text,
         dueDate: taskDueInput.value || null,
         assigneeUid: taskAssigneeSelect.value || null,
+        // срок мог измениться прямо здесь — без сброса флагов перенесённая задача
+        // больше никогда бы о себе не напомнила
+        reminded1Day: false,
+        remindedDueDay: false,
       };
 
       if (editingTaskId) {
@@ -3269,6 +3388,7 @@
 
         startUsersListener();
         startTasksListener();
+        startClosedTasksListener();
         startShoppingListener();
         startEventsListener();
         startBudgetListeners();
