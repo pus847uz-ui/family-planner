@@ -105,11 +105,11 @@ function isoDateInTimeZone(timeZone, offsetDays = 0) {
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(now);
 }
 
-async function sendTelegramMessage(botToken, chatId, text) {
+async function sendTelegramMessage(botToken, chatId, text, extra = {}) {
   const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify({ chat_id: chatId, text, ...extra }),
   });
   if (!response.ok) {
     console.error("sendTelegramMessage failed:", await response.text());
@@ -183,6 +183,31 @@ function assignmentMessage(task, assignerName, isReassignment) {
   return lines.join("\n");
 }
 
+// Кнопки под сообщением о задаче. callback_data — "действие:taskId", 64 байта лимита
+// Telegram хватает с запасом: id документа Firestore — 20 символов.
+function taskActionsKeyboard(taskId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "✅ Сделал", callback_data: `tdone:${taskId}` },
+        { text: "⏰ Перенести", callback_data: `tpost:${taskId}` },
+      ],
+    ],
+  };
+}
+
+function taskPostponeKeyboard(taskId) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "Завтра", callback_data: `tp1:${taskId}` },
+        { text: "+7 дней", callback_data: `tp7:${taskId}` },
+        { text: "← Назад", callback_data: `tback:${taskId}` },
+      ],
+    ],
+  };
+}
+
 exports.onTaskCreated = onDocumentCreated(
   { document: "tasks/{taskId}", secrets: [BOT_TOKEN] },
   async (event) => {
@@ -194,7 +219,8 @@ exports.onTaskCreated = onDocumentCreated(
     await sendTelegramMessage(
       BOT_TOKEN.value(),
       task.assigneeUid,
-      assignmentMessage(task, assignerName, false)
+      assignmentMessage(task, assignerName, false),
+      { reply_markup: taskActionsKeyboard(event.params.taskId) }
     );
   }
 );
@@ -216,7 +242,8 @@ exports.onTaskUpdated = onDocumentUpdated(
     await sendTelegramMessage(
       BOT_TOKEN.value(),
       after.assigneeUid,
-      assignmentMessage(after, assignerName, true)
+      assignmentMessage(after, assignerName, true),
+      { reply_markup: taskActionsKeyboard(event.params.taskId) }
     );
   }
 );
@@ -259,7 +286,8 @@ exports.remindAssignee = onCall({ secrets: [BOT_TOKEN] }, async (request) => {
   const delivered = await sendTelegramMessage(
     BOT_TOKEN.value(),
     task.assigneeUid,
-    lines.join("\n")
+    lines.join("\n"),
+    { reply_markup: taskActionsKeyboard(String(taskId)) }
   );
   if (!delivered) {
     throw new HttpsError("unavailable", "Telegram не принял сообщение — возможно, исполнитель ещё не писал боту");
@@ -544,6 +572,103 @@ async function handleConfirmCommand(botToken, message) {
   });
 }
 
+// ---- Нажатия кнопок под сообщениями о задачах ----
+
+async function answerCallback(botToken, callbackQueryId, text) {
+  // Ответить обязательно, иначе у нажавшего на кнопке крутятся часики до таймаута.
+  await callTelegramApi(botToken, "answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text: text || "",
+  });
+}
+
+// Арифметика по строке "ГГГГ-ММ-ДД" в UTC: перевод в локальное время и обратно мог бы
+// сдвинуть дату на сутки, а сама дата часового пояса не имеет.
+function addDaysToDateStr(dateStr, days) {
+  const base = new Date(`${dateStr}T00:00:00Z`);
+  base.setUTCDate(base.getUTCDate() + days);
+  return base.toISOString().slice(0, 10);
+}
+
+// Действие сделано — дописываем итог в текст и убираем кнопки, чтобы нельзя было
+// нажать повторно по уже неактуальной карточке.
+async function closeTaskCard(botToken, chatId, message, outcome) {
+  await callTelegramApi(botToken, "editMessageText", {
+    chat_id: chatId,
+    message_id: message.message_id,
+    text: `${message.text || ""}\n\n${outcome}`,
+    reply_markup: { inline_keyboard: [] },
+  });
+}
+
+async function handleTaskCallback(botToken, callbackQuery) {
+  const [action, taskId] = (callbackQuery.data || "").split(":");
+  if (!taskId) return;
+
+  // У слишком старого сообщения Telegram присылает callback без message —
+  // обращение к message.chat здесь уронило бы обработку апдейта целиком.
+  const message = callbackQuery.message;
+  if (!message || !message.chat) {
+    await answerCallback(botToken, callbackQuery.id, "Сообщение слишком старое, откройте задачу в приложении");
+    return;
+  }
+  const chatId = message.chat.id;
+
+  const taskRef = getFirestore().collection("tasks").doc(String(taskId));
+  const taskSnap = await taskRef.get();
+  if (!taskSnap.exists) {
+    await answerCallback(botToken, callbackQuery.id, "Задача уже удалена");
+    return;
+  }
+
+  const task = taskSnap.data();
+  const actorUid = String(callbackQuery.from.id);
+  if (task.assigneeUid !== actorUid && task.authorUid !== actorUid) {
+    await answerCallback(botToken, callbackQuery.id, "Это не ваша задача");
+    return;
+  }
+
+  if (action === "tpost" || action === "tback") {
+    await callTelegramApi(botToken, "editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: message.message_id,
+      reply_markup: action === "tpost" ? taskPostponeKeyboard(taskId) : taskActionsKeyboard(taskId),
+    });
+    await answerCallback(botToken, callbackQuery.id, "");
+    return;
+  }
+
+  if (action === "tdone") {
+    await taskRef.update({ status: "done", closedAt: FieldValue.serverTimestamp() });
+    await closeTaskCard(botToken, chatId, message, "✅ Сделано");
+    await answerCallback(botToken, callbackQuery.id, "Готово");
+    return;
+  }
+
+  if (action === "tp1" || action === "tp7") {
+    // «Завтра» — всегда завтрашний день; «+7 дней» — от текущего срока задачи,
+    // чтобы просроченную сдвигало вперёд от той даты, что уже стоит. Те же правила,
+    // что у кнопок переноса в mini-app.
+    const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+    const newDueDate =
+      action === "tp1"
+        ? isoDateInTimeZone(REMINDER_TIMEZONE, 1)
+        : addDaysToDateStr(task.dueDate || today, 7);
+
+    await taskRef.update({
+      dueDate: newDueDate,
+      // без сброса флагов перенесённая задача не напомнила бы о себе больше никогда
+      reminded1Day: false,
+      remindedDueDay: false,
+    });
+    await closeTaskCard(botToken, chatId, message, `⏰ Перенесено на ${formatDueDate(newDueDate)}`);
+    await answerCallback(botToken, callbackQuery.id, "Перенесено");
+    return;
+  }
+
+  await answerCallback(botToken, callbackQuery.id, "");
+}
+
 exports.telegramWebhook = onRequest(
   { secrets: [BOT_TOKEN, WEBHOOK_SECRET] },
   async (req, res) => {
@@ -553,9 +678,12 @@ exports.telegramWebhook = onRequest(
     }
 
     const message = req.body && req.body.message;
+    const callbackQuery = req.body && req.body.callback_query;
 
     try {
-      if (message && message.text && message.chat.type === "private" && START_RE.test(message.text)) {
+      if (callbackQuery) {
+        await handleTaskCallback(BOT_TOKEN.value(), callbackQuery);
+      } else if (message && message.text && message.chat.type === "private" && START_RE.test(message.text)) {
         await handleStartCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && CONFIRM_RE.test(message.text)) {
         await handleConfirmCommand(BOT_TOKEN.value(), message);
