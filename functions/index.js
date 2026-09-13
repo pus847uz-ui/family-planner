@@ -667,7 +667,154 @@ async function handleConfirmCommand(botToken, message) {
   });
 }
 
+// ---- Ввод из тем Telegram ----
+// Тема в семейной супергруппе привязывается к разделу командой /bind, после чего каждое
+// обычное сообщение в ней становится записью. Роутинг идёт по message_thread_id, поэтому
+// никакого «режима захвата» с состоянием и кнопкой «Стоп» не нужно: где написал — туда и
+// легло. Непривязанные темы (обсуждения поездок и т.п.) не трогаем вовсе.
+
+const TOPIC_MODULES = {
+  сделать: { key: "tasks", title: "Сделать", icon: "📋" },
+};
+const BIND_RE = /^\/bind(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/is;
+
+async function isFamilyMember(telegramId) {
+  const snap = await getFirestore().collection("users").doc(String(telegramId)).get();
+  return snap.exists;
+}
+
+async function getTopicBinding(threadId) {
+  const snap = await getFirestore().collection("topic_bindings").doc(String(threadId)).get();
+  return snap.exists ? snap.data() : null;
+}
+
+async function handleBindCommand(botToken, message) {
+  const threadId = message.message_thread_id;
+  const replyTo = { chat_id: message.chat.id, message_thread_id: threadId };
+
+  if (!threadId) {
+    await sendTelegramMessage(botToken, message.chat.id, "Команду /bind нужно отправить внутри темы.");
+    return;
+  }
+  if (!(await isFamilyMember(message.from.id))) return;
+
+  const requested = ((message.text.match(BIND_RE) || [])[1] || "").trim().toLowerCase();
+  const module = TOPIC_MODULES[requested];
+  if (!module) {
+    const available = Object.keys(TOPIC_MODULES).join(", ");
+    await sendTelegramMessage(
+      botToken,
+      message.chat.id,
+      `Не знаю раздел «${requested}». Доступно: ${available}.\nПример: /bind сделать`,
+      { message_thread_id: threadId }
+    );
+    return;
+  }
+
+  await getFirestore().collection("topic_bindings").doc(String(threadId)).set({
+    chatId: message.chat.id,
+    module: module.key,
+    boundBy: String(message.from.id),
+    createdAt: FieldValue.serverTimestamp(),
+  });
+
+  await sendTelegramMessage(
+    botToken,
+    message.chat.id,
+    `${module.icon} Тема привязана к разделу «${module.title}».\nТеперь каждое сообщение здесь становится записью.`,
+    { message_thread_id: threadId }
+  );
+}
+
+// Карточка только что захваченной задачи: срок и исполнитель проставляются кнопками,
+// текст перерисовывается после каждого тапа, чтобы было видно текущее состояние.
+function captureCardText(task, assigneeLabel) {
+  const lines = [`${TOPIC_MODULES.сделать.icon} Добавлено в «Сделать»`, "", `«${task.text}»`];
+  const parts = [];
+  const due = formatDueDate(task.dueDate);
+  if (due) parts.push(`Срок: ${due}`);
+  if (assigneeLabel) parts.push(assigneeLabel);
+  if (parts.length > 0) lines.push(parts.join(" · "));
+  return lines.join("\n");
+}
+
+function captureKeyboard(taskId, familyUsers) {
+  const rows = [
+    [
+      { text: "Сегодня", callback_data: `cd0:${taskId}` },
+      { text: "Завтра", callback_data: `cd1:${taskId}` },
+      { text: "+7 дней", callback_data: `cd7:${taskId}` },
+    ],
+  ];
+  const assignees = familyUsers.map((user) => ({
+    text: user.name || user.id,
+    callback_data: `ca:${taskId}:${user.id}`,
+  }));
+  for (let i = 0; i < assignees.length; i += 3) {
+    rows.push(assignees.slice(i, i + 3));
+  }
+  return { inline_keyboard: rows };
+}
+
+async function listFamilyUsers() {
+  const snap = await getFirestore().collection("users").get();
+  return snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
+}
+
+async function handleTopicCapture(botToken, message) {
+  const threadId = message.message_thread_id;
+  const binding = await getTopicBinding(threadId);
+  if (!binding || binding.module !== "tasks") return; // тема не привязана — не наше дело
+  if (!(await isFamilyMember(message.from.id))) return;
+
+  const authorUid = String(message.from.id);
+  const taskRef = await getFirestore().collection("tasks").add({
+    text: message.text.trim(),
+    status: "open",
+    dueDate: null,
+    assigneeUid: null,
+    authorUid,
+    lastEditedBy: authorUid,
+    createdAt: FieldValue.serverTimestamp(),
+    reminded1Day: false,
+    remindedDueDay: false,
+  });
+
+  const familyUsers = await listFamilyUsers();
+  await sendTelegramMessage(
+    botToken,
+    message.chat.id,
+    captureCardText({ text: message.text.trim(), dueDate: null }, null),
+    {
+      message_thread_id: threadId,
+      reply_to_message_id: message.message_id,
+      reply_markup: captureKeyboard(taskRef.id, familyUsers),
+    }
+  );
+}
+
+async function refreshCaptureCard(botToken, chatId, message, taskId) {
+  const [taskSnap, familyUsers] = await Promise.all([
+    getFirestore().collection("tasks").doc(String(taskId)).get(),
+    listFamilyUsers(),
+  ]);
+  if (!taskSnap.exists) return;
+
+  const task = taskSnap.data();
+  const assignee = familyUsers.find((user) => user.id === task.assigneeUid);
+  await callTelegramApi(botToken, "editMessageText", {
+    chat_id: chatId,
+    message_id: message.message_id,
+    text: captureCardText(task, assignee ? assignee.name || assignee.id : null),
+    reply_markup: captureKeyboard(taskId, familyUsers),
+  });
+}
+
 // ---- Нажатия кнопок под сообщениями о задачах ----
+
+// Разметка только что захваченной задачи — в отличие от действий над задачей,
+// доступна любому участнику семьи, потому что карточка общая.
+const CAPTURE_ACTIONS = new Set(["cd0", "cd1", "cd7", "ca"]);
 
 async function answerCallback(botToken, callbackQueryId, text) {
   // Ответить обязательно, иначе у нажавшего на кнопке крутятся часики до таймаута.
@@ -718,6 +865,30 @@ async function handleTaskCallback(botToken, callbackQuery) {
 
   const task = taskSnap.data();
   const actorUid = String(callbackQuery.from.id);
+
+  if (CAPTURE_ACTIONS.has(action)) {
+    // Карточка захвата висит в общей теме: размечать её может любой из семьи, а не
+    // только тот, кто написал сообщение.
+    if (!(await isFamilyMember(actorUid))) {
+      await answerCallback(botToken, callbackQuery.id, "Доступ только участникам семьи");
+      return;
+    }
+
+    const updates = { lastEditedBy: actorUid };
+    if (action === "ca") {
+      updates.assigneeUid = callbackQuery.data.split(":")[2] || null;
+    } else {
+      updates.dueDate = isoDateInTimeZone(REMINDER_TIMEZONE, { cd0: 0, cd1: 1, cd7: 7 }[action]);
+      updates.reminded1Day = false;
+      updates.remindedDueDay = false;
+    }
+
+    await taskRef.update(updates);
+    await refreshCaptureCard(botToken, chatId, message, taskId);
+    await answerCallback(botToken, callbackQuery.id, "Готово");
+    return;
+  }
+
   if (task.assigneeUid !== actorUid && task.authorUid !== actorUid) {
     await answerCallback(botToken, callbackQuery.id, "Это не ваша задача");
     return;
@@ -786,6 +957,17 @@ exports.telegramWebhook = onRequest(
         await handleStartCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && CONFIRM_RE.test(message.text)) {
         await handleConfirmCommand(BOT_TOKEN.value(), message);
+      } else if (message && message.text && BIND_RE.test(message.text)) {
+        await handleBindCommand(BOT_TOKEN.value(), message);
+      } else if (
+        message &&
+        message.text &&
+        !message.text.startsWith("/") &&
+        !message.from.is_bot &&
+        message.message_thread_id &&
+        (message.chat.type === "supergroup" || message.chat.type === "group")
+      ) {
+        await handleTopicCapture(BOT_TOKEN.value(), message);
       }
     } catch (err) {
       console.error("telegramWebhook failed:", err);
