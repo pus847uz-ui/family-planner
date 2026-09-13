@@ -468,6 +468,7 @@
         <div class="form-actions">
           <button type="button" id="task-postpone-tomorrow-btn" class="text-btn">⏰ Завтра</button>
           <button type="button" id="task-postpone-week-btn" class="text-btn">⏰ +7 дней</button>
+          <button type="button" id="task-remind-btn" class="text-btn" style="display: none;">🔔 Напомнить</button>
         </div>
         <div class="form-actions">
           <button type="button" id="task-notneeded-btn" class="text-btn">🚫 Не нужно</button>
@@ -806,6 +807,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
     import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js";
     import {
       getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, writeBatch, deleteField,
       query, where, orderBy, onSnapshot, serverTimestamp,
@@ -824,6 +826,7 @@
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
     const db = getFirestore(app);
+    const functions = getFunctions(app);
 
     const statusEl = document.getElementById("status");
     const appEl = document.getElementById("app");
@@ -843,6 +846,7 @@
     const taskNotNeededBtn = document.getElementById("task-notneeded-btn");
     const taskPostponeTomorrowBtn = document.getElementById("task-postpone-tomorrow-btn");
     const taskPostponeWeekBtn = document.getElementById("task-postpone-week-btn");
+    const taskRemindBtn = document.getElementById("task-remind-btn");
     const tasksClosedSection = document.getElementById("tasks-closed-section");
     const tasksClosedList = document.getElementById("tasks-closed-list");
     const shoppingTextInput = document.getElementById("shopping-text");
@@ -1075,6 +1079,11 @@
         if (tg.showConfirm) tg.showConfirm(message, (confirmed) => resolve(confirmed));
         else resolve(window.confirm(message));
       });
+    }
+
+    function notify(message) {
+      if (tg.showAlert) tg.showAlert(message);
+      else window.alert(message);
     }
 
     // ---- Карта (выбор места для события) ----
@@ -1580,6 +1589,25 @@
       haptic();
     });
 
+    const callRemindAssignee = httpsCallable(functions, "remindAssignee");
+
+    taskRemindBtn.addEventListener("click", async () => {
+      if (!editingTaskId) return;
+      const task = cachedTasks.find((t) => t.id === editingTaskId);
+      const who = task ? assigneeName(task.assigneeUid) : "исполнителю";
+      const confirmed = await confirmAction(`Отправить напоминание: ${who}?`);
+      if (!confirmed) return;
+
+      try {
+        await callRemindAssignee({ taskId: editingTaskId });
+        haptic("success");
+        notify("Напоминание отправлено");
+      } catch (err) {
+        haptic("error");
+        notify("Не удалось отправить: " + (err.message || "неизвестная ошибка"));
+      }
+    });
+
     taskNotNeededBtn.addEventListener("click", async () => {
       if (!editingTaskId) return;
       const confirmed = await confirmAction("Закрыть задачу как ненужную? Её можно вернуть.");
@@ -1595,6 +1623,12 @@
       taskDueInput.value = task.dueDate || "";
       taskAssigneeSelect.value = task.assigneeUid || "";
       taskFormActions.style.display = "block";
+      // напомнить может только автор и только другому человеку, не себе
+      const canRemind =
+        task.authorUid === auth.currentUser.uid &&
+        task.assigneeUid &&
+        task.assigneeUid !== auth.currentUser.uid;
+      taskRemindBtn.style.display = canRemind ? "" : "none";
       tg.MainButton.setText("Сохранить задачу");
       tg.BackButton.show();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1606,6 +1640,7 @@
       taskDueInput.value = "";
       taskAssigneeSelect.value = "";
       taskFormActions.style.display = "none";
+      taskRemindBtn.style.display = "none";
       if (currentPage === "tasks") {
         tg.MainButton.setText(pages.tasks.mainButtonText);
         tg.MainButton.show();
@@ -1634,6 +1669,9 @@
         text,
         dueDate: taskDueInput.value || null,
         assigneeUid: taskAssigneeSelect.value || null,
+        // Firestore-триггер уведомления не знает, кто сделал правку — по этому полю
+        // он отличает «назначили меня» от «я назначил задачу себе»
+        lastEditedBy: auth.currentUser.uid,
         // срок мог измениться прямо здесь — без сброса флагов перенесённая задача
         // больше никогда бы о себе не напомнила
         reminded1Day: false,

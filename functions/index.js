@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const {
   onDocumentCreated,
@@ -114,6 +114,7 @@ async function sendTelegramMessage(botToken, chatId, text) {
   if (!response.ok) {
     console.error("sendTelegramMessage failed:", await response.text());
   }
+  return response.ok;
 }
 
 exports.sendTaskReminders = onSchedule(
@@ -153,6 +154,119 @@ exports.sendTaskReminders = onSchedule(
     }
   }
 );
+
+// ---- Уведомления о назначении задачи ----
+// Id документа в `users` — это и есть telegram id участника, поэтому `assigneeUid`
+// можно передавать в Bot API как `chat_id` напрямую, ничего дополнительно не храня.
+
+async function getUserName(uid) {
+  if (!uid) return "—";
+  const snap = await getFirestore().collection("users").doc(String(uid)).get();
+  return (snap.exists && snap.data().name) || String(uid);
+}
+
+function formatDueDate(dueDate) {
+  if (!dueDate) return null;
+  const [year, month, day] = dueDate.split("-");
+  return `${day}.${month}.${year}`;
+}
+
+function assignmentMessage(task, assignerName, isReassignment) {
+  const lines = [
+    isReassignment ? "📋 На вас переназначена задача" : "📋 На вас назначена новая задача",
+    "",
+    `«${task.text}»`,
+  ];
+  const due = formatDueDate(task.dueDate);
+  if (due) lines.push(`Срок: ${due}`);
+  lines.push(`Назначил: ${assignerName}`);
+  return lines.join("\n");
+}
+
+exports.onTaskCreated = onDocumentCreated(
+  { document: "tasks/{taskId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const task = event.data.data();
+    if (!task.assigneeUid) return;
+    if (task.assigneeUid === task.authorUid) return; // назначил задачу сам себе
+
+    const assignerName = await getUserName(task.authorUid);
+    await sendTelegramMessage(
+      BOT_TOKEN.value(),
+      task.assigneeUid,
+      assignmentMessage(task, assignerName, false)
+    );
+  }
+);
+
+exports.onTaskUpdated = onDocumentUpdated(
+  { document: "tasks/{taskId}", secrets: [BOT_TOKEN] },
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!after.assigneeUid) return;
+    if (before.assigneeUid === after.assigneeUid) return; // исполнитель не менялся
+
+    // Кто именно правил — из документа: Firestore-триггер этого не знает, поэтому
+    // mini-app пишет `lastEditedBy` при каждом сохранении задачи.
+    const actorUid = after.lastEditedBy || after.authorUid;
+    if (after.assigneeUid === actorUid) return; // переназначил задачу на себя
+
+    const assignerName = await getUserName(actorUid);
+    await sendTelegramMessage(
+      BOT_TOKEN.value(),
+      after.assigneeUid,
+      assignmentMessage(after, assignerName, true)
+    );
+  }
+);
+
+// Кнопка «🔔 Напомнить» в карточке задачи: автор просит исполнителя вернуться к задаче.
+// Отправку делает сервер — токен бота не должен попадать в браузер.
+exports.remindAssignee = onCall({ secrets: [BOT_TOKEN] }, async (request) => {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Нужна авторизация");
+  }
+  const taskId = request.data && request.data.taskId;
+  if (!taskId) {
+    throw new HttpsError("invalid-argument", "Не передан taskId");
+  }
+
+  const taskRef = getFirestore().collection("tasks").doc(String(taskId));
+  const taskSnap = await taskRef.get();
+  if (!taskSnap.exists) {
+    throw new HttpsError("not-found", "Задача не найдена");
+  }
+
+  const task = taskSnap.data();
+  if (task.authorUid !== request.auth.uid) {
+    throw new HttpsError("permission-denied", "Напомнить может только автор задачи");
+  }
+  if (!task.assigneeUid) {
+    throw new HttpsError("failed-precondition", "У задачи нет исполнителя");
+  }
+  if (task.assigneeUid === request.auth.uid) {
+    throw new HttpsError("failed-precondition", "Нельзя напомнить самому себе");
+  }
+
+  const authorName = await getUserName(request.auth.uid);
+  const lines = [`🔔 Напоминание от ${authorName}`, "", `«${task.text}»`];
+  const due = formatDueDate(task.dueDate);
+  if (due) lines.push(`Срок: ${due}`);
+
+  // Без этой проверки отказ Telegram (например, исполнитель не нажимал /start
+  // и бот не может ему написать) вернулся бы в интерфейс как успех.
+  const delivered = await sendTelegramMessage(
+    BOT_TOKEN.value(),
+    task.assigneeUid,
+    lines.join("\n")
+  );
+  if (!delivered) {
+    throw new HttpsError("unavailable", "Telegram не принял сообщение — возможно, исполнитель ещё не писал боту");
+  }
+
+  return { ok: true };
+});
 
 const EVENT_REMINDER_INTERVAL_MS = 30 * 60 * 1000;
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
