@@ -47,6 +47,7 @@ const { notifyEventParticipants, EVENT_ACTIONS, handleEventCallback } = require(
 const { PLAN_TYPES, PLAN_TYPE_EMOJI, PLAN_TYPE_TITLE, isClosedStatus } = require("./lib/plans");
 const { BIND_RE, handleBindCommand, handleTopicCapture } = require("./lib/topics");
 const { START_RE, CONFIRM_RE, handleStartCommand, handleConfirmCommand } = require("./lib/bot");
+const { MEAL_RE, MEAL_ACTIONS, handleMealCommand, handleMealCallback } = require("./lib/meals");
 
 exports.verifyInitData = onRequest(
   { secrets: [BOT_TOKEN], cors: true },
@@ -430,6 +431,9 @@ exports.onPlanCreated = onDocumentCreated(
   async (event) => {
     const plan = event.data.data();
     if (!PLAN_TYPES.includes(plan.type)) return;
+    // Запись, родившаяся из диалога в теме «Приёмы пищи», своей темы обсуждения не
+    // получает: обсуждение уже прошло, вторая тема про тот же ужин — мусор.
+    if (plan.createdFrom === "meal_session") return;
 
     const emoji = PLAN_TYPE_EMOJI[plan.type] || "";
     const topicResult = await callTelegramApi(BOT_TOKEN.value(), "createForumTopic", {
@@ -522,6 +526,8 @@ exports.telegramWebhook = onRequest(
           await handleShoppingCallback(BOT_TOKEN.value(), callbackQuery);
         } else if (EVENT_ACTIONS.has(action)) {
           await handleEventCallback(BOT_TOKEN.value(), callbackQuery);
+        } else if (MEAL_ACTIONS.has(action)) {
+          await handleMealCallback(BOT_TOKEN.value(), callbackQuery);
         } else {
           await handleTaskCallback(BOT_TOKEN.value(), callbackQuery);
         }
@@ -531,6 +537,8 @@ exports.telegramWebhook = onRequest(
         await handleConfirmCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && BIND_RE.test(message.text)) {
         await handleBindCommand(BOT_TOKEN.value(), message);
+      } else if (message && message.text && MEAL_RE.test(message.text)) {
+        await handleMealCommand(BOT_TOKEN.value(), message);
       } else if (
         message &&
         message.text &&
