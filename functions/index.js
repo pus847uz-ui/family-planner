@@ -98,11 +98,19 @@ exports.verifyInitData = onRequest(
   }
 );
 
-const REMINDER_TIMEZONE = "Asia/Karachi";
+// Ташкент, а не Карачи: смещение то же (UTC+5), но пояс выбран осознанно, а не
+// случайно — время в напоминаниях должно совпадать с тем, по которому живёт семья.
+const REMINDER_TIMEZONE = "Asia/Tashkent";
 
 function isoDateInTimeZone(timeZone, offsetDays = 0) {
   const now = new Date(Date.now() + offsetDays * 24 * 60 * 60 * 1000);
   return new Intl.DateTimeFormat("en-CA", { timeZone }).format(now);
+}
+
+// Какой это был день по нашему поясу для произвольного момента времени. Нужно, чтобы
+// отобрать закрытое «сегодня», не вычисляя вручную смещение пояса от UTC.
+function isoDateOfInstant(instant, timeZone) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone }).format(instant);
 }
 
 async function sendTelegramMessage(botToken, chatId, text, extra = {}) {
@@ -117,39 +125,125 @@ async function sendTelegramMessage(botToken, chatId, text, extra = {}) {
   return response.ok;
 }
 
-exports.sendTaskReminders = onSchedule(
-  { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
+// ---- Утренняя сводка «что сегодня» ----
+// Личная и адресная: каждому только то, что назначено лично на него. Если назначенного
+// на сегодня ничего нет — сообщения не будет вовсе (молчание по умолчанию).
+
+function sortByDueDate(a, b) {
+  return (a.dueDate || "").localeCompare(b.dueDate || "");
+}
+
+function morningSummaryText(overdue, dueToday) {
+  const lines = ["☀️ На сегодня:"];
+  if (overdue.length > 0) {
+    lines.push("", "🔴 Просрочено:");
+    overdue.forEach((task) => lines.push(`• ${task.text} (${formatDueDate(task.dueDate)})`));
+  }
+  if (dueToday.length > 0) {
+    lines.push("", "📋 Сегодня:");
+    dueToday.forEach((task) => lines.push(`• ${task.text}`));
+  }
+  return lines.join("\n");
+}
+
+exports.sendMorningTaskSummary = onSchedule(
+  { schedule: "15 8 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
   async () => {
     const db = getFirestore();
     const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
-    const tomorrow = isoDateInTimeZone(REMINDER_TIMEZONE, 1);
 
     const [tasksSnap, usersSnap] = await Promise.all([
       db.collection("tasks").where("status", "==", "open").get(),
       db.collection("users").get(),
     ]);
-    const chatIds = usersSnap.docs.map((d) => d.id);
+    const openTasks = tasksSnap.docs.map((d) => d.data());
 
-    for (const taskDoc of tasksSnap.docs) {
-      const task = taskDoc.data();
-      if (!task.dueDate) continue;
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id;
+      const mine = openTasks.filter(
+        (task) => task.assigneeUid === uid && task.dueDate && task.dueDate <= today
+      );
+      if (mine.length === 0) continue;
 
-      let messageText = null;
-      const updates = {};
+      const overdue = mine.filter((task) => task.dueDate < today).sort(sortByDueDate);
+      const dueToday = mine.filter((task) => task.dueDate === today).sort(sortByDueDate);
 
-      if (task.dueDate === tomorrow && !task.reminded1Day) {
-        messageText = `Напоминание: завтра дедлайн задачи "${task.text}"`;
-        updates.reminded1Day = true;
-      } else if (task.dueDate === today && !task.remindedDueDay) {
-        messageText = `Напоминание: сегодня дедлайн задачи "${task.text}"`;
-        updates.remindedDueDay = true;
-      }
+      await sendTelegramMessage(BOT_TOKEN.value(), uid, morningSummaryText(overdue, dueToday));
+    }
+  }
+);
 
-      if (messageText) {
-        await Promise.all(
-          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
-        );
-        await taskDoc.ref.update(updates);
+// ---- Вечерний разбор «сделано или нет» ----
+// Сводка за день плюс отдельная карточка на каждую незакрытую задачу: по ней сразу можно
+// отчитаться, перенести срок или закрыть как ненужную, не открывая приложение.
+
+function eveningSummaryText(closedToday, pendingCount) {
+  const lines = ["🌙 Итоги дня"];
+
+  if (closedToday.length > 0) {
+    lines.push("", "Закрыто сегодня:");
+    closedToday.forEach((task) =>
+      lines.push(`${task.status === "done" ? "✅" : "🚫"} ${task.text}`)
+    );
+  }
+
+  if (pendingCount === 0) {
+    lines.push("", "На сегодня всё закрыто 👍");
+  } else {
+    lines.push("", `Осталось незакрытым: ${pendingCount}`);
+  }
+
+  return lines.join("\n");
+}
+
+function pendingTaskCardText(task) {
+  const lines = [`❓ Не закрыто: «${task.text}»`];
+  const due = formatDueDate(task.dueDate);
+  if (due) lines.push(`Срок: ${due}`);
+  return lines.join("\n");
+}
+
+exports.sendEveningTaskReview = onSchedule(
+  { schedule: "0 20 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
+  async () => {
+    const db = getFirestore();
+    const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+
+    // Сутки назад с запасом, потом отбор по дню в нашем поясе: так граница «сегодня»
+    // не зависит от того, как пояс смещён относительно UTC.
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const [openSnap, closedSnap, usersSnap] = await Promise.all([
+      db.collection("tasks").where("status", "==", "open").get(),
+      db.collection("tasks").where("closedAt", ">=", since).get(),
+      db.collection("users").get(),
+    ]);
+
+    const openTasks = openSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const closedTasks = closedSnap.docs
+      .map((d) => d.data())
+      .filter((task) => isoDateOfInstant(task.closedAt.toDate(), REMINDER_TIMEZONE) === today);
+
+    for (const userDoc of usersSnap.docs) {
+      const uid = userDoc.id;
+      const pending = openTasks
+        .filter((task) => task.assigneeUid === uid && task.dueDate && task.dueDate <= today)
+        .sort(sortByDueDate);
+      const closed = closedTasks.filter((task) => task.assigneeUid === uid);
+
+      // Ни сделанного, ни несделанного — человеку сегодня нечего сказать
+      if (pending.length === 0 && closed.length === 0) continue;
+
+      await sendTelegramMessage(
+        BOT_TOKEN.value(),
+        uid,
+        eveningSummaryText(closed, pending.length)
+      );
+
+      for (const task of pending) {
+        await sendTelegramMessage(BOT_TOKEN.value(), uid, pendingTaskCardText(task), {
+          reply_markup: taskActionsKeyboard(task.id),
+        });
       }
     }
   }
@@ -192,6 +286,7 @@ function taskActionsKeyboard(taskId) {
         { text: "✅ Сделал", callback_data: `tdone:${taskId}` },
         { text: "⏰ Перенести", callback_data: `tpost:${taskId}` },
       ],
+      [{ text: "🚫 Не нужно", callback_data: `tdrop:${taskId}` }],
     ],
   };
 }
@@ -638,10 +733,14 @@ async function handleTaskCallback(botToken, callbackQuery) {
     return;
   }
 
-  if (action === "tdone") {
-    await taskRef.update({ status: "done", closedAt: FieldValue.serverTimestamp() });
-    await closeTaskCard(botToken, chatId, message, "✅ Сделано");
-    await answerCallback(botToken, callbackQuery.id, "Готово");
+  if (action === "tdone" || action === "tdrop") {
+    const done = action === "tdone";
+    await taskRef.update({
+      status: done ? "done" : "cancelled",
+      closedAt: FieldValue.serverTimestamp(),
+    });
+    await closeTaskCard(botToken, chatId, message, done ? "✅ Сделано" : "🚫 Закрыто как ненужное");
+    await answerCallback(botToken, callbackQuery.id, done ? "Готово" : "Закрыто");
     return;
   }
 
