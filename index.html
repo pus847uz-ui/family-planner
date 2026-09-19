@@ -421,6 +421,51 @@
     }
     .group-title:first-child { margin-top: 4px; }
     .group-title.overdue { color: var(--tg-theme-destructive-text-color, #e53935); }
+
+    /* Помощник. Лента растёт сверху вниз, новая пара «вопрос — ответ» встаёт первой:
+       поле ввода остаётся на месте, и не нужно прокручивать к свежему ответу. */
+    .ask-row { display: flex; gap: 8px; margin-bottom: 12px; }
+    .ask-row input { flex: 1; min-width: 0; }
+    .ask-row button {
+      flex-shrink: 0;
+      border: none;
+      border-radius: 10px;
+      padding: 0 16px;
+      font-size: 15px;
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+    .ask-row button:disabled { opacity: 0.5; }
+
+    .ask-samples { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .ask-sample {
+      padding: 8px 14px;
+      border-radius: 20px;
+      border: none;
+      font-size: 14px;
+      text-align: left;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      color: var(--tg-theme-text-color, #111111);
+    }
+
+    .ask-thread { display: flex; flex-direction: column; gap: 16px; }
+    .ask-turn { display: flex; flex-direction: column; gap: 6px; }
+    .ask-q {
+      font-size: 15px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+    .ask-a {
+      font-size: 15px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      padding-left: 12px;
+      border-left: 2px solid var(--tg-theme-button-color, #2481cc);
+    }
+    .ask-a.pending { color: var(--tg-theme-hint-color, #999999); font-style: italic; }
+    .ask-a.failed { border-left-color: var(--tg-theme-destructive-text-color, #e53935); }
+    .ask-time { font-size: 12px; color: var(--tg-theme-hint-color, #999999); }
   </style>
 </head>
 <body>
@@ -465,6 +510,34 @@
           <span class="home-tile-title">Приёмы пищи</span>
           <span class="home-tile-stat" id="home-stat-meals"></span>
         </button>
+        <button type="button" class="home-tile" data-target="assistant">
+          <span class="home-tile-icon">💬</span>
+          <span class="home-tile-title">Помощник</span>
+          <span class="home-tile-stat">Спросить о планах</span>
+        </button>
+      </div>
+    </section>
+
+    <section id="page-assistant" class="page">
+      <div class="page-title">Помощник</div>
+
+      <div class="ask-row">
+        <input id="ask-input" type="text" placeholder="Спросите о планах" autocomplete="off">
+        <button type="button" id="ask-send-btn">Спросить</button>
+      </div>
+
+      <div class="ask-samples" id="ask-samples">
+        <button type="button" class="ask-sample">Что мне сделать сегодня?</button>
+        <button type="button" class="ask-sample">Когда ближайшее событие?</button>
+        <button type="button" class="ask-sample">Что нужно купить?</button>
+        <button type="button" class="ask-sample">Как быстрее добавить задачу?</button>
+      </div>
+
+      <div class="ask-thread" id="ask-thread"></div>
+      <div class="empty" id="ask-empty">Переписка видна только вам</div>
+
+      <div class="form-actions" id="ask-clear-actions" style="display: none;">
+        <button type="button" id="ask-clear-btn" class="text-btn danger">Очистить переписку</button>
       </div>
     </section>
 
@@ -1078,10 +1151,19 @@
         tg.BackButton.hide();
         updateHomeStats();
       } else {
-        tg.MainButton.setText(pages[pageId].mainButtonText);
-        tg.MainButton.show();
+        // У помощника нечего «добавлять», поэтому главной кнопки на нём нет — в отличие
+        // от остальных разделов, где она и есть способ создать запись.
+        const mainButtonText = (pages[pageId] || {}).mainButtonText;
+        if (mainButtonText) {
+          tg.MainButton.setText(mainButtonText);
+          tg.MainButton.show();
+        } else {
+          tg.MainButton.hide();
+        }
         tg.BackButton.show();
       }
+
+      if (pageId === "assistant") loadAskHistory();
     }
 
     function goHome() {
@@ -1093,7 +1175,8 @@
     });
 
     tg.MainButton.onClick(() => {
-      if (currentPage !== "home") pages[currentPage].add();
+      const page = pages[currentPage];
+      if (page && page.add) page.add();
     });
 
     function haptic(type) {
@@ -3622,6 +3705,156 @@
         statusEl.textContent = "Ошибка: " + err.message;
       }
     }
+
+    // ---- Помощник ----
+    // Переписка не слушается через onSnapshot, как остальные разделы: она меняется
+    // только когда спрашиваешь сам, поэтому лента перечитывается при входе на экран.
+    const callAskAi = httpsCallable(functions, "askAi");
+    const callGetAiHistory = httpsCallable(functions, "getAiHistory");
+    const callClearAiHistory = httpsCallable(functions, "clearAiHistory");
+
+    const askInput = document.getElementById("ask-input");
+    const askSendBtn = document.getElementById("ask-send-btn");
+    const askSamplesEl = document.getElementById("ask-samples");
+    const askThreadEl = document.getElementById("ask-thread");
+    const askEmptyEl = document.getElementById("ask-empty");
+    const askClearActionsEl = document.getElementById("ask-clear-actions");
+
+    let askHistory = [];
+    let askPending = null;
+    let askBusy = false;
+
+    function askTimeLabel(iso) {
+      if (!iso) return "";
+      const date = new Date(iso);
+      const today = new Date();
+      const sameDay = date.toDateString() === today.toDateString();
+      return sameDay
+        ? date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })
+        : date.toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function renderAskThread() {
+      askThreadEl.innerHTML = "";
+
+      const turns = askPending ? [askPending, ...askHistory] : askHistory;
+
+      turns.forEach((turn) => {
+        const wrap = document.createElement("div");
+        wrap.className = "ask-turn";
+
+        const q = document.createElement("div");
+        q.className = "ask-q";
+        q.textContent = turn.question;
+        wrap.appendChild(q);
+
+        const a = document.createElement("div");
+        a.className = "ask-a";
+        if (turn.state === "pending") {
+          a.classList.add("pending");
+          a.textContent = "Думаю…";
+        } else if (turn.state === "failed") {
+          a.classList.add("failed");
+          a.textContent = turn.answer;
+        } else {
+          a.textContent = turn.answer;
+        }
+        wrap.appendChild(a);
+
+        const time = askTimeLabel(turn.createdAt);
+        if (time) {
+          const t = document.createElement("div");
+          t.className = "ask-time";
+          t.textContent = time;
+          wrap.appendChild(t);
+        }
+
+        askThreadEl.appendChild(wrap);
+      });
+
+      const hasTurns = turns.length > 0;
+      askEmptyEl.style.display = hasTurns ? "none" : "";
+      askSamplesEl.style.display = hasTurns ? "none" : "";
+      askClearActionsEl.style.display = askHistory.length > 0 ? "" : "none";
+    }
+
+    async function loadAskHistory() {
+      try {
+        const result = await callGetAiHistory({ limit: 20 });
+        askHistory = (result.data && result.data.history) || [];
+      } catch (err) {
+        askHistory = [];
+      }
+      renderAskThread();
+    }
+
+    async function sendAskQuestion(question) {
+      const text = (question || "").trim();
+      if (!text || askBusy) return;
+
+      askBusy = true;
+      askSendBtn.disabled = true;
+      askInput.value = "";
+      askPending = { question: text, state: "pending", createdAt: new Date().toISOString() };
+      renderAskThread();
+
+      try {
+        const result = await callAskAi({ question: text });
+        askPending = null;
+        // Свежая пара встаёт в начало сама, без перезапроса истории: сервер только что
+        // её записал, и ответ уже на руках.
+        askHistory = [
+          {
+            id: result.data.id,
+            question: text,
+            answer: result.data.answer,
+            createdAt: new Date().toISOString(),
+          },
+          ...askHistory,
+        ];
+        haptic("success");
+      } catch (err) {
+        haptic("error");
+        askPending = {
+          question: text,
+          state: "failed",
+          answer: "Не удалось получить ответ: " + (err.message || "неизвестная ошибка"),
+          createdAt: new Date().toISOString(),
+        };
+      } finally {
+        askBusy = false;
+        askSendBtn.disabled = false;
+        renderAskThread();
+      }
+    }
+
+    askSendBtn.addEventListener("click", () => sendAskQuestion(askInput.value));
+
+    askInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        sendAskQuestion(askInput.value);
+      }
+    });
+
+    askSamplesEl.querySelectorAll(".ask-sample").forEach((btn) => {
+      btn.addEventListener("click", () => sendAskQuestion(btn.textContent));
+    });
+
+    document.getElementById("ask-clear-btn").addEventListener("click", async () => {
+      const confirmed = await confirmAction("Удалить всю переписку? Это нельзя отменить.");
+      if (!confirmed) return;
+      try {
+        await callClearAiHistory();
+        askHistory = [];
+        askPending = null;
+        renderAskThread();
+        haptic("success");
+      } catch (err) {
+        haptic("error");
+        notify("Не удалось очистить: " + (err.message || "неизвестная ошибка"));
+      }
+    });
 
     signIn();
   </script>
