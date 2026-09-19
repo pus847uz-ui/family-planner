@@ -56,7 +56,7 @@ const {
   handleMealOkCommand,
   handleMealCallback,
 } = require("./lib/meals");
-const { ASK_RE, handleAskCommand } = require("./lib/ai-bot");
+const { ASK_RE, handleAskCommand, handlePrivateText } = require("./lib/ai-bot");
 const { askModel } = require("./lib/gemini");
 const {
   SYSTEM_INSTRUCTION,
@@ -571,6 +571,14 @@ exports.telegramWebhook = onRequest(
         (message.chat.type === "supergroup" || message.chat.type === "group")
       ) {
         await handleTopicCapture(BOT_TOKEN.value(), message);
+      } else if (
+        message &&
+        message.text &&
+        !message.text.startsWith("/") &&
+        !message.from.is_bot &&
+        message.chat.type === "private"
+      ) {
+        await handlePrivateText(BOT_TOKEN.value(), GEMINI_API_KEY.value(), message);
       }
     } catch (err) {
       console.error("telegramWebhook failed:", err);

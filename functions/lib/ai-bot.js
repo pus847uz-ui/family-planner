@@ -5,6 +5,7 @@
 // в сообщение для всей семьи.
 const { callTelegramApi } = require("./telegram");
 const { isFamilyMember } = require("./users");
+const { menuQuestionFor } = require("./menu");
 const { askModel } = require("./gemini");
 const {
   SYSTEM_INSTRUCTION,
@@ -28,6 +29,37 @@ const HELP_TEXT = `Спросите про планы своими словам�
 // но обрезать по границе на всякий случай дешевле, чем ловить ошибку отправки.
 const MAX_TELEGRAM_TEXT = 4000;
 
+// Спросить и ответить в чат. Общий путь для /ask и для кнопок меню: кнопка — это тот же
+// вопрос, просто заготовленный заранее, и проходить он должен через ту же память и ту же
+// запись в историю.
+async function answerQuestion(botToken, geminiKey, chatId, uid, question) {
+  // Ответ занимает около секунды — за это время в клиенте успевает появиться «печатает»,
+  // иначе пауза выглядит так, будто команда потерялась.
+  await callTelegramApi(botToken, "sendChatAction", { chat_id: chatId, action: "typing" });
+
+  try {
+    const [context, dialogue] = await Promise.all([buildContext(uid), getRecentDialogue(uid)]);
+    const answer = await askModel(
+      geminiKey,
+      SYSTEM_INSTRUCTION,
+      `${formatContext(context)}\n\nВопрос: ${question}`,
+      dialogue
+    );
+
+    await saveConversation(uid, question, answer);
+    await callTelegramApi(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: answer.slice(0, MAX_TELEGRAM_TEXT),
+    });
+  } catch (err) {
+    console.error("answerQuestion failed:", err);
+    await callTelegramApi(botToken, "sendMessage", {
+      chat_id: chatId,
+      text: "Не получилось спросить у модели. Попробуйте ещё раз через минуту.",
+    });
+  }
+}
+
 async function handleAskCommand(botToken, geminiKey, message) {
   const chatId = message.chat.id;
   const uid = String(message.from.id);
@@ -50,31 +82,20 @@ async function handleAskCommand(botToken, geminiKey, message) {
     return;
   }
 
-  // Ответ занимает около секунды — за это время в клиенте успевает появиться «печатает»,
-  // иначе пауза выглядит так, будто команда потерялась.
-  await callTelegramApi(botToken, "sendChatAction", { chat_id: chatId, action: "typing" });
-
-  try {
-    const [context, dialogue] = await Promise.all([buildContext(uid), getRecentDialogue(uid)]);
-    const answer = await askModel(
-      geminiKey,
-      SYSTEM_INSTRUCTION,
-      `${formatContext(context)}\n\nВопрос: ${question}`,
-      dialogue
-    );
-
-    await saveConversation(uid, question, answer);
-    await callTelegramApi(botToken, "sendMessage", {
-      chat_id: chatId,
-      text: answer.slice(0, MAX_TELEGRAM_TEXT),
-    });
-  } catch (err) {
-    console.error("handleAskCommand failed:", err);
-    await callTelegramApi(botToken, "sendMessage", {
-      chat_id: chatId,
-      text: "Не получилось спросить у модели. Попробуйте ещё раз через минуту.",
-    });
-  }
+  await answerQuestion(botToken, geminiKey, chatId, uid, question);
 }
 
-module.exports = { ASK_RE, handleAskCommand };
+// Любой текст в личке — это вопрос. Команда /ask остаётся для тех, кто к ней привык, но
+// набирать её каждый раз незачем: в личке с ботом больше нечего делать с обычным текстом,
+// а нажатие кнопки меню приходит сюда же — просто с заранее заготовленной формулировкой.
+async function handlePrivateText(botToken, geminiKey, message) {
+  const uid = String(message.from.id);
+  if (!(await isFamilyMember(uid))) return;
+
+  const question = menuQuestionFor(message.text) || message.text.trim();
+  if (!question) return;
+
+  await answerQuestion(botToken, geminiKey, message.chat.id, uid, question);
+}
+
+module.exports = { ASK_RE, handleAskCommand, handlePrivateText, answerQuestion };

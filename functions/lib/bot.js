@@ -1,7 +1,7 @@
 // Команды бота: /start в личке и /confirm для закрепления бронирований в теме поездки.
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
-const { WEBAPP_URL } = require("./config");
 const { callTelegramApi, buildTelegramMessageLink } = require("./telegram");
+const { mainMenuKeyboard } = require("./menu");
 
 const BOOKING_TYPE_ICON = { flight: "✈️", hotel: "🏨", car: "🚗" };
 // Telegram-клиент в группах иногда дописывает @имя_бота после команды
@@ -13,10 +13,10 @@ const CONFIRM_RE = /^\/confirm(?:@[A-Za-z0-9_]+)?(?:\s+(.+))?$/is;
 async function handleStartCommand(botToken, message) {
   await callTelegramApi(botToken, "sendMessage", {
     chat_id: message.chat.id,
-    text: "Привет! Открой планировщик кнопкой ниже:",
-    reply_markup: {
-      inline_keyboard: [[{ text: "Открыть Family Planner", web_app: { url: WEBAPP_URL } }]],
-    },
+    text:
+      "Привет! Меню снизу — быстрые вопросы о ваших планах и вход в планировщик.\n\n" +
+      "Спросить можно и своими словами: напишите вопрос сообщением или командой /ask.",
+    reply_markup: mainMenuKeyboard(),
   });
 }
 
