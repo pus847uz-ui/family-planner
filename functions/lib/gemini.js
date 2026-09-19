@@ -16,10 +16,20 @@ function getClient(apiKey) {
   return client;
 }
 
-async function askModel(apiKey, systemInstruction, prompt) {
+// `history` — предыдущие пары в хронологическом порядке, [{question, answer}]. Уходят
+// отдельными ходами, а не вклейкой в текст вопроса: так модель понимает, где чья
+// реплика, и «а во сколько?» цепляется за прошлый ответ, а не за строку контекста.
+async function askModel(apiKey, systemInstruction, prompt, history = []) {
+  const contents = [];
+  history.forEach((turn) => {
+    contents.push({ role: "user", parts: [{ text: turn.question }] });
+    contents.push({ role: "model", parts: [{ text: turn.answer }] });
+  });
+  contents.push({ role: "user", parts: [{ text: prompt }] });
+
   const response = await getClient(apiKey).models.generateContent({
     model: MODEL,
-    contents: prompt,
+    contents,
     config: {
       systemInstruction,
       // Ответ пересказывает факты из контекста, а не сочиняет: низкая температура

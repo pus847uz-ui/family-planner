@@ -10,6 +10,7 @@ const {
   SYSTEM_INSTRUCTION,
   buildContext,
   formatContext,
+  getRecentDialogue,
   saveConversation,
 } = require("./ai");
 
@@ -54,11 +55,12 @@ async function handleAskCommand(botToken, geminiKey, message) {
   await callTelegramApi(botToken, "sendChatAction", { chat_id: chatId, action: "typing" });
 
   try {
-    const context = await buildContext(uid);
+    const [context, dialogue] = await Promise.all([buildContext(uid), getRecentDialogue(uid)]);
     const answer = await askModel(
       geminiKey,
       SYSTEM_INSTRUCTION,
-      `${formatContext(context)}\n\nВопрос: ${question}`
+      `${formatContext(context)}\n\nВопрос: ${question}`,
+      dialogue
     );
 
     await saveConversation(uid, question, answer);

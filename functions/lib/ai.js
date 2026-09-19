@@ -183,6 +183,29 @@ async function saveConversation(uid, question, answer) {
   return ref.id;
 }
 
+// Сколько прошлых пар уходит в модель и как давно они могли быть заданы. Окно нужнее
+// счётчика: «а во сколько?» имеет смысл через минуту после вопроса про событие и не
+// имеет никакого через сутки, когда человек вернулся к боту совсем с другим.
+const DIALOGUE_TURNS = 4;
+const DIALOGUE_WINDOW_MS = 30 * 60 * 1000;
+
+async function getRecentDialogue(uid) {
+  const snap = await conversationsRef(uid)
+    .orderBy("createdAt", "desc")
+    .limit(DIALOGUE_TURNS)
+    .get();
+
+  const edge = Date.now() - DIALOGUE_WINDOW_MS;
+  const fresh = snap.docs
+    .map((d) => d.data())
+    // Записи без createdAt быть не должно, но пока сервер не проставил отметку, поле
+    // приходит пустым — такую пару безопаснее пропустить, чем считать свежей.
+    .filter((c) => c.createdAt && c.createdAt.toMillis() >= edge)
+    .map((c) => ({ question: c.question, answer: c.answer }));
+
+  return fresh.reverse(); // от старых к новым — в порядке разговора
+}
+
 async function getConversationHistory(uid, limit = 10) {
   const snap = await conversationsRef(uid).orderBy("createdAt", "desc").limit(limit).get();
   return snap.docs.map((d) => {
@@ -211,6 +234,7 @@ module.exports = {
   SYSTEM_INSTRUCTION,
   buildContext,
   formatContext,
+  getRecentDialogue,
   saveConversation,
   getConversationHistory,
   clearConversationHistory,

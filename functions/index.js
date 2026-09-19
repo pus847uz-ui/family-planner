@@ -62,6 +62,7 @@ const {
   SYSTEM_INSTRUCTION,
   buildContext,
   formatContext,
+  getRecentDialogue,
   saveConversation,
   getConversationHistory,
   clearConversationHistory,
@@ -624,11 +625,12 @@ exports.askAi = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
   }
 
   try {
-    const context = await buildContext(uid);
+    const [context, dialogue] = await Promise.all([buildContext(uid), getRecentDialogue(uid)]);
     const answer = await askModel(
       GEMINI_API_KEY.value(),
       SYSTEM_INSTRUCTION,
-      `${formatContext(context)}\n\nВопрос: ${question}`
+      `${formatContext(context)}\n\nВопрос: ${question}`,
+      dialogue
     );
     const id = await saveConversation(uid, question, answer);
     return { answer, id };
