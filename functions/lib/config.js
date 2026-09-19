@@ -10,6 +10,7 @@ initializeApp();
 
 const BOT_TOKEN = defineSecret("BOT_TOKEN");
 const WEBHOOK_SECRET = defineSecret("WEBHOOK_SECRET");
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 // Приватная супергруппа с включённым режимом Topics — обсуждения поездок/досуга/приёмов пищи.
 // Не секрет (просто числовой ID чата), поэтому хранится как обычная константа.
 const TOPICS_CHAT_ID = -1004324845791;
@@ -32,6 +33,7 @@ const TOPIC_MODULES = {
 module.exports = {
   BOT_TOKEN,
   WEBHOOK_SECRET,
+  GEMINI_API_KEY,
   TOPICS_CHAT_ID,
   WEBAPP_URL,
   MAX_INIT_DATA_AGE_SECONDS,

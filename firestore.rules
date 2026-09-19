@@ -9,6 +9,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isFamilyMember();
       allow write: if false;
+
+      // Переписка с ИИ — единственное в базе, что закрыто от второго члена семьи:
+      // задачи и покупки общие по смыслу, а вопрос «что мне сделать» — личный.
+      // Условие именно uid == userId, а не isFamilyMember(), иначе историю читали бы оба.
+      // Пишет и чистит только сервер через Admin SDK, поэтому запись закрыта всем.
+      match /ai_conversations/{conversationId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if false;
+      }
     }
 
     match /tasks/{taskId} {

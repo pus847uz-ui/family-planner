@@ -13,6 +13,7 @@ const { getAuth } = require("firebase-admin/auth");
 const {
   BOT_TOKEN,
   WEBHOOK_SECRET,
+  GEMINI_API_KEY,
   TOPICS_CHAT_ID,
   REMINDER_TIMEZONE,
 } = require("./lib/config");
@@ -55,6 +56,16 @@ const {
   handleMealOkCommand,
   handleMealCallback,
 } = require("./lib/meals");
+const { ASK_RE, handleAskCommand } = require("./lib/ai-bot");
+const { askModel } = require("./lib/gemini");
+const {
+  SYSTEM_INSTRUCTION,
+  buildContext,
+  formatContext,
+  saveConversation,
+  getConversationHistory,
+  clearConversationHistory,
+} = require("./lib/ai");
 
 exports.verifyInitData = onRequest(
   { secrets: [BOT_TOKEN], cors: true },
@@ -512,7 +523,7 @@ exports.onPlanDeleted = onDocumentDeleted(
 );
 
 exports.telegramWebhook = onRequest(
-  { secrets: [BOT_TOKEN, WEBHOOK_SECRET] },
+  { secrets: [BOT_TOKEN, WEBHOOK_SECRET, GEMINI_API_KEY] },
   async (req, res) => {
     if (req.headers["x-telegram-bot-api-secret-token"] !== WEBHOOK_SECRET.value()) {
       res.status(401).send("Unauthorized");
@@ -544,6 +555,8 @@ exports.telegramWebhook = onRequest(
         await handleConfirmCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && BIND_RE.test(message.text)) {
         await handleBindCommand(BOT_TOKEN.value(), message);
+      } else if (message && message.text && ASK_RE.test(message.text)) {
+        await handleAskCommand(BOT_TOKEN.value(), GEMINI_API_KEY.value(), message);
       } else if (message && message.text && MEAL_RE.test(message.text)) {
         await handleMealCommand(BOT_TOKEN.value(), message);
       } else if (message && message.text && MEAL_OK_RE.test(message.text)) {
@@ -593,3 +606,49 @@ exports.onBudgetAlert = onMessagePublished(
     await Promise.all(chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, text)));
   }
 );
+
+// ---- ИИ-помощник для мини-приложения ----
+// Те же вопросы, что и /ask в боте, но из интерфейса планировщика. История у каждого
+// своя: и запись, и чтение идут по uid вызывающего, подделать чужой нельзя.
+
+const MAX_QUESTION_LENGTH = 1000;
+
+exports.askAi = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+
+  const question = String((request.data && request.data.question) || "").trim();
+  if (!question) throw new HttpsError("invalid-argument", "Вопрос пустой");
+  if (question.length > MAX_QUESTION_LENGTH) {
+    throw new HttpsError("invalid-argument", "Вопрос слишком длинный");
+  }
+
+  try {
+    const context = await buildContext(uid);
+    const answer = await askModel(
+      GEMINI_API_KEY.value(),
+      SYSTEM_INSTRUCTION,
+      `${formatContext(context)}\n\nВопрос: ${question}`
+    );
+    const id = await saveConversation(uid, question, answer);
+    return { answer, id };
+  } catch (err) {
+    console.error("askAi failed:", err);
+    throw new HttpsError("internal", "Модель не ответила, попробуйте ещё раз");
+  }
+});
+
+exports.getAiHistory = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+
+  const limit = Math.min(Math.max(Number(request.data && request.data.limit) || 10, 1), 50);
+  return { history: await getConversationHistory(uid, limit) };
+});
+
+exports.clearAiHistory = onCall(async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+
+  return { deleted: await clearConversationHistory(uid) };
+});
