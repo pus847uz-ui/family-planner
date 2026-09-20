@@ -422,6 +422,21 @@
     .group-title:first-child { margin-top: 4px; }
     .group-title.overdue { color: var(--tg-theme-destructive-text-color, #e53935); }
 
+    /* Итог по регулярным платежам. Главный вопрос к вкладке, поэтому стоит над списком
+       и набран крупнее строк, а не притворяется одной из них. */
+    .recurring-total {
+      padding: 14px 16px;
+      margin-bottom: 12px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .recurring-total-main { font-size: 18px; font-weight: 600; }
+    .recurring-total-parts {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      margin-top: 4px;
+    }
+
     /* Помощник. Лента растёт сверху вниз, новая пара «вопрос — ответ» встаёт первой:
        поле ввода остаётся на месте, и не нужно прокручивать к свежему ответу. */
     .ask-row { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -711,6 +726,12 @@
             <button type="button" id="recurring-cancel-btn" class="text-btn">Отмена</button>
           </div>
         </div>
+
+        <div id="recurring-total" class="recurring-total" style="display: none;">
+          <div class="recurring-total-main" id="recurring-total-main"></div>
+          <div class="recurring-total-parts" id="recurring-total-parts"></div>
+        </div>
+
         <ul id="recurring-list" class="list"></ul>
       </div>
     </section>
@@ -1018,6 +1039,9 @@
     const recurringDeleteBtn = document.getElementById("recurring-delete-btn");
     const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
+    const recurringTotalEl = document.getElementById("recurring-total");
+    const recurringTotalMainEl = document.getElementById("recurring-total-main");
+    const recurringTotalPartsEl = document.getElementById("recurring-total-parts");
 
     const homeStatTripsEl = document.getElementById("home-stat-trips");
     const homeStatLeisureEl = document.getElementById("home-stat-leisure");
@@ -2740,7 +2764,39 @@
 
     let editingRecurringId = null;
 
+    // Итог считается по свежему курсу, а не по зафиксированному при заведении: это
+    // будущие расходы, и важно, во что они обойдутся сейчас, а не сколько стоили когда-то.
+    function renderRecurringTotal() {
+      if (allRecurring.length === 0) {
+        recurringTotalEl.style.display = "none";
+        return;
+      }
+
+      let total = 0;
+      let unconverted = 0;
+      const byCurrency = {};
+
+      allRecurring.forEach((payment) => {
+        const currency = payment.currency || BASE_CURRENCY;
+        byCurrency[currency] = (byCurrency[currency] || 0) + payment.amount;
+        const base = toBaseAmount(payment.amount, currency);
+        if (base === null) unconverted += 1;
+        else total += base;
+      });
+
+      recurringTotalEl.style.display = "block";
+      recurringTotalMainEl.textContent = `В месяц ${formatAmount(Math.round(total), BASE_CURRENCY)}`;
+
+      const parts = Object.entries(byCurrency)
+        .filter(([currency]) => currency !== BASE_CURRENCY)
+        .map(([currency, amount]) => formatAmount(amount, currency));
+      if (unconverted > 0) parts.push(`без курса: ${unconverted}`);
+
+      recurringTotalPartsEl.textContent = parts.length > 0 ? `в том числе ${parts.join(" · ")}` : "";
+    }
+
     function renderRecurring() {
+      renderRecurringTotal();
       recurringListEl.innerHTML = "";
       if (allRecurring.length === 0) {
         recurringListEl.innerHTML = '<li class="empty" style="background:none;">Регулярных платежей нет</li>';
@@ -2754,12 +2810,21 @@
           li.className = "event-row";
           li.addEventListener("click", () => startEditRecurring(payment));
 
+          const currency = payment.currency || BASE_CURRENCY;
           const text = document.createElement("span");
           text.className = "text";
           text.textContent = payment.title;
+
           const due = document.createElement("span");
           due.className = "due";
-          due.textContent = `${formatAmount(payment.amount, payment.currency)} · ${payment.dueDay} числа`;
+          const parts = [formatAmount(payment.amount, currency)];
+          if (currency !== BASE_CURRENCY) {
+            const base = toBaseAmount(payment.amount, currency);
+            if (base !== null) parts.push(`≈ ${formatAmount(Math.round(base), BASE_CURRENCY)}`);
+          }
+          parts.push(`${payment.dueDay} числа`);
+          due.textContent = parts.join(" · ");
+
           li.appendChild(text);
           li.appendChild(due);
           recurringListEl.appendChild(li);
@@ -3849,6 +3914,7 @@
         // Не ждём его — плитка дорисуется, когда курс придёт.
         loadExchangeRates().then(() => {
           renderProjects();
+          renderRecurring();
           if (activeProjectId) renderProjectDetail();
           updateHomeStats();
         });
