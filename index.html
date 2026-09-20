@@ -801,6 +801,9 @@
           <button type="button" id="project-delete-btn" class="text-btn danger">Удалить проект</button>
         </div>
 
+        <div id="entries-hint" class="field-label" style="display: none; margin-bottom: 6px;">
+          Нажмите на запись, чтобы удалить её
+        </div>
         <ul id="entries-list" class="list"></ul>
       </div>
 
@@ -1163,6 +1166,7 @@
     const projectEditSaveBtn = document.getElementById("project-edit-save-btn");
     const projectEditCancelBtn = document.getElementById("project-edit-cancel-btn");
     const entriesListEl = document.getElementById("entries-list");
+    const entriesHintEl = document.getElementById("entries-hint");
     const recurringTitleInput = document.getElementById("recurring-title");
     const recurringAmountInput = document.getElementById("recurring-amount");
     const recurringCurrencySelect = document.getElementById("recurring-currency");
@@ -2853,6 +2857,7 @@
       }
 
       entriesListEl.innerHTML = "";
+      entriesHintEl.style.display = entries.length > 0 ? "" : "none";
       if (entries.length === 0) {
         entriesListEl.innerHTML = '<li class="empty" style="background:none;">Записей ещё нет</li>';
       } else {
@@ -2861,6 +2866,7 @@
           .sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0))
           .forEach((entry) => {
             const li = document.createElement("li");
+            li.className = "event-row";
             const sign = entry.type === "income" ? "+" : "−";
             const currency = entry.currency || project.currency || BASE_CURRENCY;
 
@@ -2891,6 +2897,12 @@
               info.textContent = meta.join(" · ");
               li.appendChild(info);
             }
+
+            // Запись правится только удалением: сумма и валюта — это то, что уже
+            // случилось, и «исправить» их обычно значит, что запись завели по ошибке.
+            // Дубли после двойного нажатия — как раз такой случай.
+            li.addEventListener("click", () => deleteEntry(entry, currency));
+
             entriesListEl.appendChild(li);
           });
       }
@@ -3039,6 +3051,23 @@
         haptic();
       });
     });
+
+    async function deleteEntry(entry, currency) {
+      // В подтверждении показываем ровно то, по чему человек нажал: в списке дублей
+      // «удалить запись» без суммы и комментария не даёт понять, какую именно.
+      const label = [
+        `${entry.type === "income" ? "+" : "−"} ${formatAmount(entry.amount, currency)}`,
+        entry.comment,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+
+      const confirmed = await confirmAction(`Удалить запись «${label}»?`);
+      if (!confirmed) return;
+
+      await deleteDoc(doc(db, "budget_entries", entry.id));
+      haptic("success");
+    }
 
     entryIncomeBtn.addEventListener("click", () => addEntry("income"));
     entryExpenseBtn.addEventListener("click", () => addEntry("expense"));
