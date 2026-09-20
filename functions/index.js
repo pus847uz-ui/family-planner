@@ -407,6 +407,23 @@ const RECURRING_REMINDER_DAYS_BEFORE = 3;
 // сведётся к её коду — так старые записи остаются читаемыми.
 const CURRENCY_SYMBOLS = { UZS: "сум", USD: "$", EUR: "€", RUB: "₽" };
 
+// Кому писать о платеже. Личный знает только автор; у общего с назначенным плательщиком
+// напоминание нужно тому, кто платит, — второму оно ничего не даёт и лишь приучает
+// пролистывать сообщения бота. Платёж без плательщика общий, как было всегда.
+function paymentRecipients(payment, chatIds) {
+  const known = (uid) => chatIds.includes(String(uid));
+
+  if (payment.visibility === "private") {
+    return known(payment.authorUid) ? [String(payment.authorUid)] : [];
+  }
+  if (payment.payerUid && known(payment.payerUid)) {
+    return [String(payment.payerUid)];
+  }
+  // Плательщик указан, но такого участника больше нет — молчать хуже, чем написать
+  // обоим: платёж-то остался.
+  return chatIds;
+}
+
 exports.sendRecurringPaymentReminders = onSchedule(
   { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
   async () => {
@@ -451,7 +468,9 @@ exports.sendRecurringPaymentReminders = onSchedule(
 
       if (messageText) {
         await Promise.all(
-          chatIds.map((chatId) => sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText))
+          paymentRecipients(payment, chatIds).map((chatId) =>
+            sendTelegramMessage(BOT_TOKEN.value(), chatId, messageText)
+          )
         );
         await paymentDoc.ref.update(updates);
       }
