@@ -447,47 +447,52 @@
        справляться, когда к сумме добавились пересчёт, периодичность, плательщик и замок:
        правая половина расползалась и переносилась как попало. Теперь три яруса —
        название с суммой, условия, следующий платёж, — и глаз находит нужное сразу. */
-    .payment-card {
+    /* Селектор с `.list li`, а не просто `.payment-card`: общее правило списка задаёт
+       display: flex и по специфичности выигрывает у одиночного класса — ярусы карточки
+       вставали в ряд, а название сжималось в столбик по одной букве. */
+    .list li.payment-card {
       display: block;
       padding: 12px 14px;
       margin-bottom: 8px;
       border-radius: 12px;
       background: var(--tg-theme-secondary-bg-color, #f5f5f5);
     }
-    .payment-head {
+    .list li.payment-card .payment-head {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
       gap: 10px;
     }
-    .payment-title {
+    /* Длинное название переносится по словам и жмётся только в крайнем случае: правило
+       anywhere рвало «Квартплату» посреди слова, когда места не хватало. */
+    .list li.payment-card .payment-title {
       font-size: 16px;
       font-weight: 500;
       min-width: 0;
-      overflow-wrap: anywhere;
+      flex: 1;
+      word-break: break-word;
     }
-    .payment-amount {
+    .list li.payment-card .payment-amount {
       font-size: 16px;
       font-weight: 600;
       white-space: nowrap;
       flex-shrink: 0;
     }
-    .payment-meta {
+    .list li.payment-card .payment-meta {
       font-size: 13px;
       color: var(--tg-theme-hint-color, #999999);
-      margin-top: 3px;
-      overflow-wrap: anywhere;
+      margin-top: 4px;
     }
-    .payment-next {
+    .list li.payment-card .payment-next {
       font-size: 13px;
       margin-top: 6px;
       color: var(--tg-theme-link-color, #2481cc);
     }
     /* Истекающий срок — единственное, о чём стоит предупредить в списке: платёж ещё
        виден, но скоро замолчит сам, и это лучше заметить заранее. */
-    .payment-next.ending { color: var(--tg-theme-hint-color, #999999); }
-    .payment-card.paused .payment-title,
-    .payment-card.paused .payment-amount { opacity: 0.55; }
+    .list li.payment-card .payment-next.ending { color: var(--tg-theme-hint-color, #999999); }
+    .list li.payment-card.paused .payment-title,
+    .list li.payment-card.paused .payment-amount { opacity: 0.55; }
 
     /* Итог по регулярным платежам. Главный вопрос к вкладке, поэтому стоит над списком
        и набран крупнее строк, а не притворяется одной из них. */
@@ -1315,6 +1320,10 @@
       }
 
       if (pageId === "assistant") loadAskHistory();
+      // Пересобираем подраздел бюджета при каждом входе: иначе главная кнопка сохраняла
+      // подпись от той вкладки, на которой раздел покинули, и предлагала создать проект
+      // поверх списка платежей.
+      if (pageId === "budget" && !activeProjectId) showBudgetSubview(currentBudgetSub);
     }
 
     function goHome() {
@@ -2539,6 +2548,7 @@
     let allRecurring = [];
     let currentArchiveFilter = "active";
     let activeProjectId = null;
+    let currentBudgetSub = "projects";
 
     function populateCurrencySelect(selectEl) {
       Object.entries(CURRENCIES).forEach(([code, symbol]) => {
@@ -3028,6 +3038,7 @@
     });
 
     function showBudgetSubview(sub) {
+      currentBudgetSub = sub;
       if (sub !== "recurring" && editingRecurringId) resetRecurringForm();
       document.querySelectorAll("#budget-subnav .period-btn").forEach((btn) => {
         btn.classList.toggle("active", btn.dataset.budgetSub === sub);
