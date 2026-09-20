@@ -569,6 +569,13 @@
     .an-hero-label { font-size: 13px; color: var(--tg-theme-hint-color, #999999); }
     .an-hero-value { font-size: 26px; font-weight: 700; margin: 2px 0 12px; }
     .an-hero-note { font-size: 13px; color: var(--tg-theme-hint-color, #999999); margin-top: 8px; }
+    /* Строка про личные платежи отделена сверху: она о другом — не о структуре расходов,
+       а о том, какая их часть вообще не видна второму. */
+    .an-hero-note.an-private {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(127, 127, 127, 0.2);
+    }
 
     /* Две доли в одной полосе: обязательное и остальное. Отдельные полосы пришлось бы
        сравнивать глазом, а здесь граница между ними и есть ответ. */
@@ -735,6 +742,7 @@
         <div class="an-hero-value" id="an-total">—</div>
         <div class="an-split" id="an-mandatory-bar"></div>
         <div class="an-hero-note" id="an-mandatory-note"></div>
+        <div class="an-hero-note an-private" id="an-private-note"></div>
       </div>
 
       <div class="group-title">Кто сколько платит</div>
@@ -1329,6 +1337,7 @@
     const anTotalEl = document.getElementById("an-total");
     const anMandatoryBarEl = document.getElementById("an-mandatory-bar");
     const anMandatoryNoteEl = document.getElementById("an-mandatory-note");
+    const anPrivateNoteEl = document.getElementById("an-private-note");
     const anPayersEl = document.getElementById("an-payers");
     const anForecastEl = document.getElementById("an-forecast");
     const anForecastNoteEl = document.getElementById("an-forecast-note");
@@ -3844,6 +3853,18 @@
       anMandatoryNoteEl.textContent = total > 0
         ? `Обязательных ${Math.round((must / total) * 100)}% · остальное ${formatAmount(Math.round(optional), BASE_CURRENCY)}`
         : "Активных платежей нет";
+
+      // Сколько из этой суммы — закрытые платежи. Строка появляется, только когда они
+      // есть, и по определению видна лишь их владельцу: у второго эти платежи даже не
+      // доходят до расчёта.
+      const privateTotal = monthTotal(
+        payments.filter((p) => p.visibility === "private"),
+        thisMonth
+      );
+      anPrivateNoteEl.textContent = privateTotal > 0
+        ? `Из них личных ${formatAmount(Math.round(privateTotal), BASE_CURRENCY)} — их видите только вы`
+        : "";
+      anPrivateNoteEl.style.display = privateTotal > 0 ? "" : "none";
 
       // Кто сколько платит
       anPayersEl.innerHTML = "";
