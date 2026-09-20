@@ -721,6 +721,7 @@
       <div class="quick-add">
         <input id="shopping-text" type="text" placeholder="Что купить?">
         <input id="shopping-qty" type="text" placeholder="Кол-во" style="flex: 0 0 92px; min-width: 0;">
+        <input id="shopping-due" type="date" title="Когда купить (необязательно)">
       </div>
       <select id="shopping-assignee" style="width: 100%; margin-bottom: 12px;">
         <option value="">Не назначено</option>
@@ -731,7 +732,7 @@
         <button type="button" id="shopping-cancel-btn" class="text-btn">Отмена</button>
       </div>
       <div class="period-toggle" id="shopping-person-filter"></div>
-      <ul id="shopping-list" class="list"></ul>
+      <div id="shopping-list"></div>
 
       <div id="shopping-closed-section" style="display: none;">
         <div class="group-title">Куплено сегодня</div>
@@ -1143,6 +1144,7 @@
     const tasksClosedList = document.getElementById("tasks-closed-list");
     const shoppingTextInput = document.getElementById("shopping-text");
     const shoppingQtyInput = document.getElementById("shopping-qty");
+    const shoppingDueInput = document.getElementById("shopping-due");
     const shoppingAssigneeSelect = document.getElementById("shopping-assignee");
     const shoppingPersonFilterEl = document.getElementById("shopping-person-filter");
     const shoppingFormActions = document.getElementById("shopping-form-actions");
@@ -1741,7 +1743,7 @@
     }
 
     // Порядок групп фиксированный, пустые не показываются.
-    function groupTasksByDue(tasks) {
+    function groupByDue(items) {
       const today = localDateStr(new Date());
       const tomorrow = localDateStr(new Date(Date.now() + 86400000));
       const groups = [
@@ -1753,12 +1755,12 @@
       ];
       const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
 
-      tasks.forEach((task) => {
-        if (!task.dueDate) byKey.nodate.items.push(task);
-        else if (task.dueDate < today) byKey.overdue.items.push(task);
-        else if (task.dueDate === today) byKey.today.items.push(task);
-        else if (task.dueDate === tomorrow) byKey.tomorrow.items.push(task);
-        else byKey.later.items.push(task);
+      items.forEach((item) => {
+        if (!item.dueDate) byKey.nodate.items.push(item);
+        else if (item.dueDate < today) byKey.overdue.items.push(item);
+        else if (item.dueDate === today) byKey.today.items.push(item);
+        else if (item.dueDate === tomorrow) byKey.tomorrow.items.push(item);
+        else byKey.later.items.push(item);
       });
 
       groups.forEach((group) => {
@@ -1823,7 +1825,7 @@
         return;
       }
 
-      groupTasksByDue(visible).forEach((group) => {
+      groupByDue(visible).forEach((group) => {
         const title = document.createElement("div");
         title.className = "group-title" + (group.key === "overdue" ? " overdue" : "");
         title.textContent = group.title;
@@ -2065,6 +2067,41 @@
 
     // Список намеренно плоский, без группировки по людям: его читают у полки в магазине,
     // и там нужен один сплошной перечень. Разделение по людям даёт фильтр сверху.
+    function buildShoppingRow(item, groupKey) {
+      const li = document.createElement("li");
+      li.className = "event-row";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.addEventListener("click", (e) => e.stopPropagation());
+      checkbox.addEventListener("change", async () => {
+        haptic();
+        await closeShoppingItem(item.id, "bought");
+      });
+
+      const text = document.createElement("span");
+      text.className = "text";
+      text.textContent = item.text;
+
+      li.appendChild(checkbox);
+      li.appendChild(text);
+
+      const meta = [item.quantity, item.assigneeUid ? assigneeName(item.assigneeUid) : null];
+      // Дату не повторяем в группах «Сегодня» и «Завтра» — заголовок уже её назвал.
+      if (item.dueDate && groupKey !== "today" && groupKey !== "tomorrow") meta.push(item.dueDate);
+
+      const filled = meta.filter(Boolean);
+      if (filled.length > 0) {
+        const who = document.createElement("span");
+        who.className = "due";
+        who.textContent = filled.join(" · ");
+        li.appendChild(who);
+      }
+
+      li.addEventListener("click", () => startEditShoppingItem(item));
+      return li;
+    }
+
     function renderShoppingList() {
       shoppingList.innerHTML = "";
       const visible = cachedShopping.filter((item) =>
@@ -2072,44 +2109,25 @@
       );
 
       if (visible.length === 0) {
-        const empty = document.createElement("li");
+        const empty = document.createElement("div");
         empty.className = "empty";
-        empty.style.background = "none";
         empty.textContent = personFilterEmptyMessage(currentShoppingPersonFilter, "Список пуст");
         shoppingList.appendChild(empty);
         return;
       }
 
-      visible.forEach((item) => {
-        const li = document.createElement("li");
-        li.className = "event-row";
+      // Те же группы, что и в задачах: «купить сегодня» и «купить на выходных» — разные
+      // дела, и в одном сплошном списке они сливались.
+      groupByDue(visible).forEach((group) => {
+        const title = document.createElement("div");
+        title.className = "group-title" + (group.key === "overdue" ? " overdue" : "");
+        title.textContent = group.title;
+        shoppingList.appendChild(title);
 
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.addEventListener("click", (e) => e.stopPropagation());
-        checkbox.addEventListener("change", async () => {
-          haptic();
-          await closeShoppingItem(item.id, "bought");
-        });
-
-        const text = document.createElement("span");
-        text.className = "text";
-        text.textContent = item.text;
-
-        li.appendChild(checkbox);
-        li.appendChild(text);
-
-        const meta = [item.quantity, item.assigneeUid ? assigneeName(item.assigneeUid) : null]
-          .filter(Boolean);
-        if (meta.length > 0) {
-          const who = document.createElement("span");
-          who.className = "due";
-          who.textContent = meta.join(" · ");
-          li.appendChild(who);
-        }
-
-        li.addEventListener("click", () => startEditShoppingItem(item));
-        shoppingList.appendChild(li);
+        const ul = document.createElement("ul");
+        ul.className = "list";
+        group.items.forEach((item) => ul.appendChild(buildShoppingRow(item, group.key)));
+        shoppingList.appendChild(ul);
       });
     }
 
@@ -2193,6 +2211,7 @@
       editingShoppingId = item.id;
       shoppingTextInput.value = item.text;
       shoppingQtyInput.value = item.quantity || "";
+      shoppingDueInput.value = item.dueDate || "";
       shoppingAssigneeSelect.value = item.assigneeUid || "";
       shoppingFormActions.style.display = "flex";
       tg.MainButton.setText("Сохранить позицию");
@@ -2204,6 +2223,7 @@
       editingShoppingId = null;
       shoppingTextInput.value = "";
       shoppingQtyInput.value = "";
+      shoppingDueInput.value = "";
       shoppingAssigneeSelect.value = "";
       shoppingFormActions.style.display = "none";
       if (currentPage === "shopping") {
@@ -2233,6 +2253,7 @@
       const data = {
         text,
         quantity: shoppingQtyInput.value.trim() || null,
+        dueDate: shoppingDueInput.value || null,
         assigneeUid: shoppingAssigneeSelect.value || null,
         // по нему Firestore-триггер отличит «меня назначили» от «я назначил себе»
         lastEditedBy: auth.currentUser.uid,

@@ -100,7 +100,12 @@ async function buildContext(uid) {
     }),
     shopping: shoppingSnap.docs.slice(0, LIMIT).map((d) => {
       const s = d.data();
-      return { text: s.text, quantity: s.quantity, assignee: nameOf(usersById, s.assigneeUid) };
+      return {
+        text: s.text,
+        quantity: s.quantity,
+        dueDate: s.dueDate,
+        assignee: nameOf(usersById, s.assigneeUid),
+      };
     }),
     events: eventsSnap.docs.map((d) => {
       const e = d.data();
@@ -148,6 +153,7 @@ function formatContext(ctx) {
       const parts = [];
       if (s.quantity) parts.push(String(s.quantity));
       if (s.assignee) parts.push(`на ${s.assignee}`);
+      if (s.dueDate) parts.push(`купить до ${s.dueDate}`);
       lines.push(`- ${s.text}${parts.length ? ` (${parts.join(", ")})` : ""}`);
     });
   }
