@@ -2317,9 +2317,10 @@
     }
 
     // ---- Бюджет ----
-    const CURRENCIES = {
-      USD: "$", EUR: "€", UZS: "сум", RUB: "₽", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴",
-    };
+    // Базовая валюта первой: в ней большинство трат и в ней же считается общий итог.
+    // Остальные курсы ЦБ отдаёт десятками, но в выборе они только мешают — четырёх хватает.
+    const BASE_CURRENCY = "UZS";
+    const CURRENCIES = { UZS: "сум", USD: "$", EUR: "€", RUB: "₽" };
     let allProjects = [];
     let allEntries = [];
     let allRecurring = [];

@@ -57,6 +57,7 @@ const {
   handleMealOkCommand,
   handleMealCallback,
 } = require("./lib/meals");
+const { fetchRatesFromCbu, saveRatesForDate, getRatesForDate } = require("./lib/rates");
 const { ASK_RE, handleAskCommand, handlePrivateText } = require("./lib/ai-bot");
 const { askModel } = require("./lib/gemini");
 const {
@@ -402,9 +403,9 @@ exports.sendEventReminders = onSchedule(
 );
 
 const RECURRING_REMINDER_DAYS_BEFORE = 3;
-const CURRENCY_SYMBOLS = {
-  USD: "$", EUR: "€", UZS: "сум", RUB: "₽", KZT: "₸", PKR: "₨", GBP: "£", UAH: "₴",
-};
+// Те же четыре, что и в приложении. Для платежа в снятой с выбора валюте подпись
+// сведётся к её коду — так старые записи остаются читаемыми.
+const CURRENCY_SYMBOLS = { UZS: "сум", USD: "$", EUR: "€", RUB: "₽" };
 
 exports.sendRecurringPaymentReminders = onSchedule(
   { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
@@ -457,6 +458,50 @@ exports.sendRecurringPaymentReminders = onSchedule(
     }
   }
 );
+
+// Курс ЦБ на сегодня публикуется накануне вечером, так что утренний запуск уже застаёт
+// свежий. Раз в сутки достаточно: официальный курс внутри дня не меняется.
+exports.fetchExchangeRates = onSchedule(
+  { schedule: "30 7 * * *", timeZone: REMINDER_TIMEZONE },
+  async () => {
+    const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+    try {
+      const rates = await fetchRatesFromCbu();
+      await saveRatesForDate(today, rates);
+      console.log(`[rates] ${today}:`, rates);
+    } catch (err) {
+      // Молча: вчерашний курс остаётся в силе, а трата запишется по последнему
+      // известному. Ронять функцию из-за недоступного сайта ЦБ незачем.
+      console.error("[rates] не удалось обновить:", err.message);
+    }
+  }
+);
+
+// Курс для приложения: оно фиксирует его в записи о трате, поэтому просит не «последний
+// известный», а курс на конкретный день. Если документа на сегодня ещё нет — плановая
+// функция не отработала, ЦБ лежал, сегодня выходной — тянем сами и сохраняем; если и ЦБ
+// недоступен, отдаём последний известный вместе с его датой, чтобы приложение показало,
+// на какое число посчитано.
+exports.getExchangeRates = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Нужна авторизация");
+
+  const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+
+  const todaySnap = await getFirestore().collection("exchange_rates").doc(today).get();
+  if (todaySnap.exists) return { date: today, rates: todaySnap.data().rates };
+
+  try {
+    const rates = await fetchRatesFromCbu();
+    await saveRatesForDate(today, rates);
+    return { date: today, rates };
+  } catch (err) {
+    console.error("[rates] запрос по требованию не удался:", err.message);
+  }
+
+  const fallback = await getRatesForDate(today, addDaysToDateStr);
+  if (!fallback) throw new HttpsError("unavailable", "Курс пока недоступен");
+  return fallback;
+});
 
 exports.onPlanCreated = onDocumentCreated(
   { document: "plans/{planId}", secrets: [BOT_TOKEN] },
