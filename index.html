@@ -443,6 +443,52 @@
       color: var(--tg-theme-button-text-color, #ffffff);
     }
 
+    /* Карточка платежа. Прежняя строка «название — всё остальное справа» перестала
+       справляться, когда к сумме добавились пересчёт, периодичность, плательщик и замок:
+       правая половина расползалась и переносилась как попало. Теперь три яруса —
+       название с суммой, условия, следующий платёж, — и глаз находит нужное сразу. */
+    .payment-card {
+      display: block;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .payment-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .payment-title {
+      font-size: 16px;
+      font-weight: 500;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .payment-amount {
+      font-size: 16px;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .payment-meta {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      margin-top: 3px;
+      overflow-wrap: anywhere;
+    }
+    .payment-next {
+      font-size: 13px;
+      margin-top: 6px;
+      color: var(--tg-theme-link-color, #2481cc);
+    }
+    /* Истекающий срок — единственное, о чём стоит предупредить в списке: платёж ещё
+       виден, но скоро замолчит сам, и это лучше заметить заранее. */
+    .payment-next.ending { color: var(--tg-theme-hint-color, #999999); }
+    .payment-card.paused .payment-title,
+    .payment-card.paused .payment-amount { opacity: 0.55; }
+
     /* Итог по регулярным платежам. Главный вопрос к вкладке, поэтому стоит над списком
        и набран крупнее строк, а не притворяется одной из них. */
     .recurring-total {
@@ -745,7 +791,33 @@
             <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
             <select id="recurring-currency"></select>
           </div>
-          <input id="recurring-day" type="number" min="1" max="31" placeholder="День месяца (1–31)">
+          <div class="period-toggle" id="recurring-period">
+            <button type="button" class="period-btn active" data-period="monthly">Месяц</button>
+            <button type="button" class="period-btn" data-period="weekly">Неделя</button>
+            <button type="button" class="period-btn" data-period="yearly">Год</button>
+          </div>
+
+          <div class="event-form-row" id="recurring-when-monthly">
+            <label>Число</label>
+            <input id="recurring-day" type="number" min="1" max="31" placeholder="1–31">
+          </div>
+
+          <div class="event-form-row" id="recurring-when-weekly" style="display: none;">
+            <label>День</label>
+            <select id="recurring-weekday"></select>
+          </div>
+
+          <div class="event-form-row" id="recurring-when-yearly" style="display: none;">
+            <label>Когда</label>
+            <select id="recurring-month"></select>
+            <input id="recurring-yearly-day" type="number" min="1" max="31" placeholder="число">
+          </div>
+
+          <div class="event-form-row">
+            <label>До</label>
+            <input id="recurring-ends" type="date" title="Последний платёж (необязательно)">
+          </div>
+
           <div class="meta-row">
             <select id="recurring-payer"></select>
             <button type="button" id="recurring-shared-btn" class="share-chip">🔒 Только я</button>
@@ -1078,6 +1150,13 @@
     const recurringFormActions = document.getElementById("recurring-form-actions");
     const recurringDeleteBtn = document.getElementById("recurring-delete-btn");
     const recurringPauseBtn = document.getElementById("recurring-pause-btn");
+    const recurringWeekdaySelect = document.getElementById("recurring-weekday");
+    const recurringMonthSelect = document.getElementById("recurring-month");
+    const recurringYearlyDayInput = document.getElementById("recurring-yearly-day");
+    const recurringEndsInput = document.getElementById("recurring-ends");
+    const recurringWhenMonthly = document.getElementById("recurring-when-monthly");
+    const recurringWhenWeekly = document.getElementById("recurring-when-weekly");
+    const recurringWhenYearly = document.getElementById("recurring-when-yearly");
     const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
     const recurringTotalEl = document.getElementById("recurring-total");
@@ -2507,6 +2586,90 @@
       return toBaseAmount(project.limit, project.currency || BASE_CURRENCY);
     }
 
+    // Периодичность платежей. Зеркало functions/lib/payments.js: логика короткая, а
+    // сборка ради одного общего файла тут не стоит свеч — но расходиться этим двум
+    // копиям нельзя, иначе приложение будет обещать одну дату, а бот напомнит в другую.
+    const PAYMENTS_PER_YEAR = { monthly: 12, weekly: 52, yearly: 1 };
+    const WEEKDAY_NAMES = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"];
+    // Родительный падеж для дат вида «22 сентября». Именительный уже есть выше как
+    // MONTH_NAMES — списком, а не срезанием окончания: «мая» обратно в «май» никаким
+    // правилом не превращается.
+    const MONTH_IN = ["января", "февраля", "марта", "апреля", "мая", "июня",
+      "июля", "августа", "сентября", "октября", "ноября", "декабря"];
+
+    // Готовые фразы вместо склеивания: у дней недели три разных рода, и «каждый среда»
+    // с «каждыйе суббота» — ровно то, что получается из попытки собрать их правилом.
+    const WEEKDAY_EVERY = [
+      "каждый понедельник", "каждый вторник", "каждую среду", "каждый четверг",
+      "каждую пятницу", "каждую субботу", "каждое воскресенье",
+    ];
+
+    function isoAddDays(isoDate, days) {
+      const base = new Date(`${isoDate}T00:00:00Z`);
+      base.setUTCDate(base.getUTCDate() + days);
+      return base.toISOString().slice(0, 10);
+    }
+
+    function isoWeekday(isoDate) {
+      const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
+      return day === 0 ? 7 : day;
+    }
+
+    // 31-е в коротком месяце и 29 февраля в невисокосный год съезжают на последний день.
+    function dueDateInMonth(yearMonth, dueDay) {
+      const [year, month] = yearMonth.split("-").map(Number);
+      const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      return `${yearMonth}-${String(Math.min(dueDay, daysInMonth)).padStart(2, "0")}`;
+    }
+
+    function periodOf(payment) {
+      return PAYMENTS_PER_YEAR[payment.period] ? payment.period : "monthly";
+    }
+
+    function isDueOn(payment, isoDate) {
+      if (payment.startsOn && isoDate < payment.startsOn) return false;
+      if (payment.endsOn && isoDate > payment.endsOn) return false;
+
+      const period = periodOf(payment);
+      if (period === "weekly") return isoWeekday(isoDate) === Number(payment.dueWeekday);
+      if (period === "yearly") {
+        const month = String(Number(payment.dueMonth) || 1).padStart(2, "0");
+        return isoDate === dueDateInMonth(`${isoDate.slice(0, 4)}-${month}`, Number(payment.dueDay) || 1);
+      }
+      return isoDate === dueDateInMonth(isoDate.slice(0, 7), Number(payment.dueDay) || 1);
+    }
+
+    function nextDueDate(payment, fromIsoDate) {
+      let date = fromIsoDate;
+      for (let i = 0; i <= 366; i += 1) {
+        if (isDueOn(payment, date)) return date;
+        date = isoAddDays(date, 1);
+      }
+      return null;
+    }
+
+    // Еженедельный платёж — это 52 платежа в год, а не четыре в месяц: наивный счёт
+    // занизил бы итог почти на десятую часть.
+    function monthlyCost(payment) {
+      return (payment.amount * PAYMENTS_PER_YEAR[periodOf(payment)]) / 12;
+    }
+
+    function describeSchedule(payment) {
+      const period = periodOf(payment);
+      if (period === "weekly") {
+        return WEEKDAY_EVERY[(Number(payment.dueWeekday) || 1) - 1];
+      }
+      if (period === "yearly") {
+        return `раз в год, ${payment.dueDay} ${MONTH_IN[(Number(payment.dueMonth) || 1) - 1]}`;
+      }
+      return `каждый месяц, ${payment.dueDay} числа`;
+    }
+
+    function formatDateHuman(isoDate) {
+      const [, month, day] = isoDate.split("-");
+      return `${Number(day)} ${MONTH_IN[Number(month) - 1]}`;
+    }
+
     // Разбивка сумм по тому, кто платит. Ключ пустой строкой — «вместе»: так записи без
     // плательщика не теряются и видно, какая часть расходов осталась общей.
     function sumByPayer(items, amountOf) {
@@ -2900,6 +3063,38 @@
 
     let editingRecurringId = null;
     let currentRecurringStatus = "active";
+    let currentRecurringPeriod = "monthly";
+
+    WEEKDAY_NAMES.forEach((name, index) => {
+      const opt = document.createElement("option");
+      opt.value = String(index + 1);
+      opt.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      recurringWeekdaySelect.appendChild(opt);
+    });
+
+    MONTH_NAMES.forEach((name, index) => {
+      const opt = document.createElement("option");
+      opt.value = String(index + 1);
+      opt.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+      recurringMonthSelect.appendChild(opt);
+    });
+
+    function showRecurringPeriod(period) {
+      currentRecurringPeriod = period;
+      document.querySelectorAll("#recurring-period .period-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.period === period);
+      });
+      recurringWhenMonthly.style.display = period === "monthly" ? "" : "none";
+      recurringWhenWeekly.style.display = period === "weekly" ? "" : "none";
+      recurringWhenYearly.style.display = period === "yearly" ? "" : "none";
+    }
+
+    document.querySelectorAll("#recurring-period .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        showRecurringPeriod(btn.dataset.period);
+        haptic();
+      });
+    });
 
     document.querySelectorAll("#recurring-status-filter .period-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2933,10 +3128,13 @@
       let unconverted = 0;
       const byCurrency = {};
 
+      // Считаем месячную стоимость, а не номинал: в одном списке теперь и подписка на
+      // месяц, и секция на неделю, и страховка на год — складывать их как есть нельзя.
       payments.forEach((payment) => {
         const currency = payment.currency || BASE_CURRENCY;
-        byCurrency[currency] = (byCurrency[currency] || 0) + payment.amount;
-        const base = toBaseAmount(payment.amount, currency);
+        const perMonth = monthlyCost(payment);
+        byCurrency[currency] = (byCurrency[currency] || 0) + perMonth;
+        const base = toBaseAmount(perMonth, currency);
         if (base === null) unconverted += 1;
         else total += base;
       });
@@ -2948,7 +3146,9 @@
           : `Приостановлено на ${formatAmount(Math.round(total), BASE_CURRENCY)} в месяц`;
 
       recurringTotalPayersEl.textContent = formatPayerBreakdown(
-        sumByPayer(payments, (payment) => toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY))
+        sumByPayer(payments, (payment) =>
+          toBaseAmount(monthlyCost(payment), payment.currency || BASE_CURRENCY)
+        )
       );
 
       const parts = Object.entries(byCurrency)
@@ -2972,33 +3172,63 @@
           "</li>";
         return;
       }
+      const today = localDateStr(new Date());
+
       payments
         .slice()
-        .sort((a, b) => a.dueDay - b.dueDay)
-        .forEach((payment) => {
+        // Сортируем по ближайшему платежу, а не по числу месяца: с разными
+        // периодичностями число ничего не значит, а «что списывается раньше» —
+        // единственный порядок, в котором список читают.
+        .map((payment) => ({ payment, next: nextDueDate(payment, today) }))
+        .sort((a, b) => (a.next || "9999").localeCompare(b.next || "9999"))
+        .forEach(({ payment, next }) => {
+          const currency = payment.currency || BASE_CURRENCY;
           const li = document.createElement("li");
-          li.className = "event-row";
+          li.className = "payment-card" + (payment.status === "paused" ? " paused" : "");
           li.addEventListener("click", () => startEditRecurring(payment));
 
-          const currency = payment.currency || BASE_CURRENCY;
-          const text = document.createElement("span");
-          text.className = "text";
-          text.textContent = payment.title;
+          const head = document.createElement("div");
+          head.className = "payment-head";
+          const title = document.createElement("span");
+          title.className = "payment-title";
+          title.textContent = payment.title;
+          const amount = document.createElement("span");
+          amount.className = "payment-amount";
+          amount.textContent = formatAmount(payment.amount, currency);
+          head.appendChild(title);
+          head.appendChild(amount);
+          li.appendChild(head);
 
-          const due = document.createElement("span");
-          due.className = "due";
-          const parts = [formatAmount(payment.amount, currency)];
+          const meta = [describeSchedule(payment)];
           if (currency !== BASE_CURRENCY) {
             const base = toBaseAmount(payment.amount, currency);
-            if (base !== null) parts.push(`≈ ${formatAmount(Math.round(base), BASE_CURRENCY)}`);
+            if (base !== null) meta.push(`≈ ${formatAmount(Math.round(base), BASE_CURRENCY)}`);
           }
-          parts.push(`${payment.dueDay} числа`);
-          if (payment.payerUid) parts.push(assigneeName(payment.payerUid));
-          if (payment.visibility === "private") parts.push("🔒");
-          due.textContent = parts.join(" · ");
+          if (payment.payerUid) meta.push(assigneeName(payment.payerUid));
+          if (payment.visibility === "private") meta.push("🔒");
 
-          li.appendChild(text);
-          li.appendChild(due);
+          const metaEl = document.createElement("div");
+          metaEl.className = "payment-meta";
+          metaEl.textContent = meta.join(" · ");
+          li.appendChild(metaEl);
+
+          const nextEl = document.createElement("div");
+          if (payment.status === "paused") {
+            nextEl.className = "payment-next ending";
+            nextEl.textContent = "Приостановлен";
+          } else if (!next) {
+            nextEl.className = "payment-next ending";
+            nextEl.textContent = payment.endsOn ? `Закончился ${formatDateHuman(payment.endsOn)}` : "Платежей больше нет";
+          } else {
+            const isToday = next === today;
+            nextEl.className = "payment-next";
+            nextEl.textContent = isToday ? "Платёж сегодня" : `Следующий ${formatDateHuman(next)}`;
+            if (payment.endsOn) {
+              nextEl.textContent += ` · до ${formatDateHuman(payment.endsOn)}`;
+            }
+          }
+          li.appendChild(nextEl);
+
           recurringListEl.appendChild(li);
         });
     }
@@ -3008,7 +3238,18 @@
       recurringTitleInput.value = payment.title;
       recurringAmountInput.value = payment.amount;
       recurringCurrencySelect.value = payment.currency || BASE_CURRENCY;
-      recurringDayInput.value = payment.dueDay;
+
+      const period = periodOf(payment);
+      showRecurringPeriod(period);
+      if (period === "weekly") {
+        recurringWeekdaySelect.value = String(payment.dueWeekday || 1);
+      } else if (period === "yearly") {
+        recurringMonthSelect.value = String(payment.dueMonth || 1);
+        recurringYearlyDayInput.value = payment.dueDay || "";
+      } else {
+        recurringDayInput.value = payment.dueDay || "";
+      }
+      recurringEndsInput.value = payment.endsOn || "";
       recurringPayerSelect.value = payment.payerUid || "";
       // Заведённые до появления кнопки считаются общими — так их и показываем.
       setShareChip(recurringSharedBtn, payment.visibility !== "private");
@@ -3025,6 +3266,9 @@
       recurringTitleInput.value = "";
       recurringAmountInput.value = "";
       recurringDayInput.value = "";
+      recurringYearlyDayInput.value = "";
+      recurringEndsInput.value = "";
+      showRecurringPeriod("monthly");
       recurringPayerSelect.value = "";
       setShareChip(recurringSharedBtn, false);
       recurringFormActions.style.display = "none";
@@ -3063,30 +3307,55 @@
     async function addRecurringPayment() {
       const title = recurringTitleInput.value.trim();
       const amount = Number(recurringAmountInput.value);
-      const dueDay = Number(recurringDayInput.value);
-      if (!title || !amount || amount <= 0 || !dueDay || dueDay < 1 || dueDay > 31) {
+      if (!title || !amount || amount <= 0) {
         haptic("error");
+        (title ? recurringAmountInput : recurringTitleInput).focus();
         return;
+      }
+
+      // Каждой периодичности нужно своё: числа месяца, дня недели или даты в году.
+      const period = currentRecurringPeriod;
+      const schedule = { period };
+      if (period === "weekly") {
+        schedule.dueWeekday = Number(recurringWeekdaySelect.value) || 1;
+        schedule.dueDay = null;
+        schedule.dueMonth = null;
+      } else {
+        const dayInput = period === "yearly" ? recurringYearlyDayInput : recurringDayInput;
+        const dueDay = Number(dayInput.value);
+        if (!dueDay || dueDay < 1 || dueDay > 31) {
+          haptic("error");
+          dayInput.focus();
+          return;
+        }
+        schedule.dueDay = dueDay;
+        schedule.dueWeekday = null;
+        schedule.dueMonth = period === "yearly" ? Number(recurringMonthSelect.value) || 1 : null;
       }
 
       const data = {
         title,
         amount,
         currency: recurringCurrencySelect.value,
-        dueDay,
+        ...schedule,
+        endsOn: recurringEndsInput.value || null,
         payerUid: recurringPayerSelect.value || null,
         visibility: isShared(recurringSharedBtn) ? "shared" : "private",
       };
 
       if (editingRecurringId) {
-        // Отметки об отправленных напоминаниях сбрасываем только когда переехал день
-        // платежа. Раньше их снимало любое изменение, и правка суммы после ушедшего
+        // Отметки об отправленных напоминаниях сбрасываем только когда переехало само
+        // расписание. Раньше их снимало любое изменение, и правка суммы после ушедшего
         // напоминания приводила к повтору в том же месяце.
-        const existing = allRecurring.find((p) => p.id === editingRecurringId);
-        const dayMoved = !existing || existing.dueDay !== dueDay;
+        const existing = allRecurring.find((p) => p.id === editingRecurringId) || {};
+        const moved =
+          periodOf(existing) !== period ||
+          existing.dueDay !== schedule.dueDay ||
+          existing.dueWeekday !== schedule.dueWeekday ||
+          existing.dueMonth !== schedule.dueMonth;
         await updateDoc(doc(db, "recurring_payments", editingRecurringId), {
           ...data,
-          ...(dayMoved ? { remindedMonth3Day: null, remindedMonthDueDay: null } : {}),
+          ...(moved ? { remindedDueDate: null, remindedWarnDate: null } : {}),
         });
       } else {
         await addDoc(collection(db, "recurring_payments"), {

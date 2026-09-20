@@ -82,6 +82,13 @@ function paymentDateInMonth(yearMonth, dueDay) {
   return `${yearMonth}-${pad2(Math.min(dueDay, daysInMonth))}`;
 }
 
+// День недели: 1 — понедельник, 7 — воскресенье. Такая же нумерация в ISO и в том, как
+// о неделе говорят вслух, в отличие от getUTCDay() с воскресеньем в нуле.
+function weekdayOfDateStr(dateStr) {
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
 // Арифметика по строке "ГГГГ-ММ-ДД" в UTC: перевод в локальное время и обратно мог бы
 // сдвинуть дату на сутки, а сама дата часового пояса не имеет.
 function addDaysToDateStr(dateStr, days) {
@@ -101,5 +108,6 @@ module.exports = {
   pad2,
   shiftYearMonth,
   paymentDateInMonth,
+  weekdayOfDateStr,
   addDaysToDateStr,
 };
