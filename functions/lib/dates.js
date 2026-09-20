@@ -61,12 +61,6 @@ function formatDueDate(dueDate) {
   return `${day}.${month}.${year}`;
 }
 
-function dayAndMonthKeyInTimeZone(timeZone) {
-  const iso = isoDateInTimeZone(timeZone, 0); // "YYYY-MM-DD"
-  const [year, month, day] = iso.split("-").map(Number);
-  return { day, monthKey: `${year}-${String(month).padStart(2, "0")}` };
-}
-
 function pad2(n) {
   return String(n).padStart(2, "0");
 }
@@ -75,6 +69,17 @@ function shiftYearMonth(yearMonth, delta) {
   const [year, month] = yearMonth.split("-").map(Number);
   const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
   return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}`;
+}
+
+// Какого числа платёж списывается в конкретном месяце. День берётся из настройки, но
+// 31-го в феврале не бывает — в коротком месяце платёж съезжает на последний день, как
+// это делают банки. Без сдвига платёж с 29-го по 31-е просто пропускал бы февраль,
+// апрель, июнь, сентябрь и ноябрь.
+function paymentDateInMonth(yearMonth, dueDay) {
+  const [year, month] = yearMonth.split("-").map(Number);
+  // Нулевой день следующего месяца — это последний день текущего.
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${yearMonth}-${pad2(Math.min(dueDay, daysInMonth))}`;
 }
 
 // Арифметика по строке "ГГГГ-ММ-ДД" в UTC: перевод в локальное время и обратно мог бы
@@ -93,8 +98,8 @@ module.exports = {
   timeZoneOffsetMinutes,
   zonedToInstant,
   formatDueDate,
-  dayAndMonthKeyInTimeZone,
   pad2,
   shiftYearMonth,
+  paymentDateInMonth,
   addDaysToDateStr,
 };

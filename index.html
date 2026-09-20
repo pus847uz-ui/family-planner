@@ -2670,10 +2670,14 @@
       const data = { title, amount, currency: recurringCurrencySelect.value, dueDay };
 
       if (editingRecurringId) {
+        // Отметки об отправленных напоминаниях сбрасываем только когда переехал день
+        // платежа. Раньше их снимало любое изменение, и правка суммы после ушедшего
+        // напоминания приводила к повтору в том же месяце.
+        const existing = allRecurring.find((p) => p.id === editingRecurringId);
+        const dayMoved = !existing || existing.dueDay !== dueDay;
         await updateDoc(doc(db, "recurring_payments", editingRecurringId), {
           ...data,
-          remindedMonth3Day: null,
-          remindedMonthDueDay: null,
+          ...(dayMoved ? { remindedMonth3Day: null, remindedMonthDueDay: null } : {}),
         });
       } else {
         await addDoc(collection(db, "recurring_payments"), {

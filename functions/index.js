@@ -21,7 +21,8 @@ const { checkTelegramInitData } = require("./lib/auth");
 const {
   isoDateInTimeZone,
   isoDateOfInstant,
-  dayAndMonthKeyInTimeZone,
+  addDaysToDateStr,
+  paymentDateInMonth,
   formatDueDate,
 } = require("./lib/dates");
 const { sendTelegramMessage, callTelegramApi, buildTopicLink, answerCallback } = require("./lib/telegram");
@@ -409,7 +410,15 @@ exports.sendRecurringPaymentReminders = onSchedule(
   { schedule: "0 9 * * *", timeZone: REMINDER_TIMEZONE, secrets: [BOT_TOKEN] },
   async () => {
     const db = getFirestore();
-    const { day, monthKey } = dayAndMonthKeyInTimeZone(REMINDER_TIMEZONE);
+    // Сравниваем полные даты, а не номера дней. Через номер платёж 31-го пропускал
+    // короткие месяцы, а предупреждение за три дня не работало для платежей 1–3 числа:
+    // день напоминания уходил в ноль или минус и отсекался проверкой.
+    const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
+    const todayMonth = today.slice(0, 7);
+    // Заглядываем на три дня вперёд — так переход через границу месяца получается сам
+    // собой: 29 января мы видим, что 1 февраля платёж, и предупреждаем.
+    const soon = addDaysToDateStr(today, RECURRING_REMINDER_DAYS_BEFORE);
+    const soonMonth = soon.slice(0, 7);
 
     const [paymentsSnap, usersSnap] = await Promise.all([
       db.collection("recurring_payments").where("status", "==", "active").get(),
@@ -420,19 +429,23 @@ exports.sendRecurringPaymentReminders = onSchedule(
     for (const paymentDoc of paymentsSnap.docs) {
       const payment = paymentDoc.data();
       const symbol = CURRENCY_SYMBOLS[payment.currency] || payment.currency || "";
-      const reminderDay = payment.dueDay - RECURRING_REMINDER_DAYS_BEFORE;
       const updates = {};
       let messageText = null;
 
-      if (reminderDay >= 1 && day === reminderDay && payment.remindedMonth3Day !== monthKey) {
+      const dueToday = paymentDateInMonth(todayMonth, payment.dueDay);
+      const dueSoon = paymentDateInMonth(soonMonth, payment.dueDay);
+
+      if (today === dueToday && payment.remindedMonthDueDay !== todayMonth) {
+        messageText =
+          `Сегодня платёж «${payment.title}» — ${payment.amount.toLocaleString("ru-RU")} ${symbol}`;
+        updates.remindedMonthDueDay = todayMonth;
+      } else if (soon === dueSoon && payment.remindedMonth3Day !== soonMonth) {
         messageText =
           `Через ${RECURRING_REMINDER_DAYS_BEFORE} дня платёж «${payment.title}» — ` +
           `${payment.amount.toLocaleString("ru-RU")} ${symbol}`;
-        updates.remindedMonth3Day = monthKey;
-      } else if (day === payment.dueDay && payment.remindedMonthDueDay !== monthKey) {
-        messageText =
-          `Сегодня платёж «${payment.title}» — ${payment.amount.toLocaleString("ru-RU")} ${symbol}`;
-        updates.remindedMonthDueDay = monthKey;
+        // Отметка о месяце самого платежа, а не о текущем: предупреждение про 1 февраля
+        // уходит 29 января, и пометить январь значило бы предупредить дважды.
+        updates.remindedMonth3Day = soonMonth;
       }
 
       if (messageText) {
