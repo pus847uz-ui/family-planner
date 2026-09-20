@@ -680,7 +680,7 @@
         <div class="event-form">
           <input id="project-title" type="text" placeholder="Название проекта (например, «Ремонт кухни»)">
           <div class="event-form-row">
-            <input id="project-limit" type="number" step="0.01" min="0" placeholder="Ориентировочный лимит">
+            <input id="project-limit" type="number" step="0.01" min="0" placeholder="Лимит (необязательно)">
             <select id="project-currency"></select>
           </div>
         </div>
@@ -718,7 +718,7 @@
             <input id="entry-amount" type="number" step="0.01" min="0" placeholder="Сумма">
             <select id="entry-currency"></select>
           </div>
-          <input id="entry-comment" type="text" placeholder="Комментарий / #хэштег (необязательно)">
+          <input id="entry-comment" type="text" placeholder="Комментарий (необязательно)">
           <div class="meta-row">
             <select id="entry-payer"></select>
             <button type="button" id="entry-shared-btn" class="share-chip">🔒 Только я</button>
@@ -751,9 +751,15 @@
             <button type="button" id="recurring-shared-btn" class="share-chip">🔒 Только я</button>
           </div>
           <div class="form-actions" id="recurring-form-actions" style="display: none;">
+            <button type="button" id="recurring-pause-btn" class="text-btn">Приостановить</button>
             <button type="button" id="recurring-delete-btn" class="text-btn danger">Удалить платёж</button>
             <button type="button" id="recurring-cancel-btn" class="text-btn">Отмена</button>
           </div>
+        </div>
+
+        <div class="period-toggle" id="recurring-status-filter">
+          <button type="button" class="period-btn active" data-status="active">Активные</button>
+          <button type="button" class="period-btn" data-status="paused">Приостановленные</button>
         </div>
 
         <div id="recurring-total" class="recurring-total" style="display: none;">
@@ -1071,6 +1077,7 @@
     const recurringDayInput = document.getElementById("recurring-day");
     const recurringFormActions = document.getElementById("recurring-form-actions");
     const recurringDeleteBtn = document.getElementById("recurring-delete-btn");
+    const recurringPauseBtn = document.getElementById("recurring-pause-btn");
     const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
     const recurringTotalEl = document.getElementById("recurring-total");
@@ -2706,10 +2713,13 @@
 
     async function createProject() {
       const title = projectTitleInput.value.trim();
-      const limit = Number(projectLimitInput.value);
-      if (!title || !limit || limit <= 0) {
+      // Лимит необязателен: «ремонт, посмотрим сколько выйдет» — обычное дело, и требовать
+      // выдуманное число только ради создания проекта незачем. Без лимита проект просто
+      // копит траты, без полосы и без «осталось» — сравнивать не с чем.
+      const limit = Number(projectLimitInput.value) || null;
+      if (!title) {
         haptic("error");
-        (title ? projectLimitInput : projectTitleInput).focus();
+        projectTitleInput.focus();
         return;
       }
 
@@ -2744,8 +2754,8 @@
 
     projectEditSaveBtn.addEventListener("click", async () => {
       const title = projectEditTitleInput.value.trim();
-      const limit = Number(projectEditLimitInput.value);
-      if (!title || !limit || limit <= 0) {
+      const limit = Number(projectEditLimitInput.value) || null;
+      if (!title) {
         haptic("error");
         return;
       }
@@ -2889,11 +2899,32 @@
     });
 
     let editingRecurringId = null;
+    let currentRecurringStatus = "active";
+
+    document.querySelectorAll("#recurring-status-filter .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentRecurringStatus = btn.dataset.status;
+        document.querySelectorAll("#recurring-status-filter .period-btn").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        if (editingRecurringId) resetRecurringForm();
+        renderRecurring();
+      });
+    });
+
+    // Приостановленные не платятся, поэтому и в месячный итог не идут — иначе цифра
+    // отвечала бы на вопрос, которого никто не задавал.
+    function visibleRecurring() {
+      return allRecurring.filter(
+        (payment) => (payment.status || "active") === currentRecurringStatus
+      );
+    }
 
     // Итог считается по свежему курсу, а не по зафиксированному при заведении: это
     // будущие расходы, и важно, во что они обойдутся сейчас, а не сколько стоили когда-то.
     function renderRecurringTotal() {
-      if (allRecurring.length === 0) {
+      const payments = visibleRecurring();
+      if (payments.length === 0) {
         recurringTotalEl.style.display = "none";
         return;
       }
@@ -2902,7 +2933,7 @@
       let unconverted = 0;
       const byCurrency = {};
 
-      allRecurring.forEach((payment) => {
+      payments.forEach((payment) => {
         const currency = payment.currency || BASE_CURRENCY;
         byCurrency[currency] = (byCurrency[currency] || 0) + payment.amount;
         const base = toBaseAmount(payment.amount, currency);
@@ -2911,10 +2942,13 @@
       });
 
       recurringTotalEl.style.display = "block";
-      recurringTotalMainEl.textContent = `В месяц ${formatAmount(Math.round(total), BASE_CURRENCY)}`;
+      recurringTotalMainEl.textContent =
+        currentRecurringStatus === "active"
+          ? `В месяц ${formatAmount(Math.round(total), BASE_CURRENCY)}`
+          : `Приостановлено на ${formatAmount(Math.round(total), BASE_CURRENCY)} в месяц`;
 
       recurringTotalPayersEl.textContent = formatPayerBreakdown(
-        sumByPayer(allRecurring, (payment) => toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY))
+        sumByPayer(payments, (payment) => toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY))
       );
 
       const parts = Object.entries(byCurrency)
@@ -2928,11 +2962,17 @@
     function renderRecurring() {
       renderRecurringTotal();
       recurringListEl.innerHTML = "";
-      if (allRecurring.length === 0) {
-        recurringListEl.innerHTML = '<li class="empty" style="background:none;">Регулярных платежей нет</li>';
+      const payments = visibleRecurring();
+      if (payments.length === 0) {
+        recurringListEl.innerHTML =
+          '<li class="empty" style="background:none;">' +
+          (currentRecurringStatus === "active"
+            ? "Регулярных платежей нет"
+            : "Приостановленных платежей нет") +
+          "</li>";
         return;
       }
-      allRecurring
+      payments
         .slice()
         .sort((a, b) => a.dueDay - b.dueDay)
         .forEach((payment) => {
@@ -2972,6 +3012,8 @@
       recurringPayerSelect.value = payment.payerUid || "";
       // Заведённые до появления кнопки считаются общими — так их и показываем.
       setShareChip(recurringSharedBtn, payment.visibility !== "private");
+      recurringPauseBtn.textContent =
+        (payment.status || "active") === "paused" ? "Возобновить" : "Приостановить";
       recurringFormActions.style.display = "flex";
       tg.MainButton.setText("Сохранить платёж");
       tg.BackButton.show();
@@ -2993,6 +3035,22 @@
     }
 
     recurringCancelBtn.addEventListener("click", resetRecurringForm);
+
+    // Пауза вместо удаления: отключил подписку на пару месяцев — платёж остаётся со своей
+    // суммой и числом, и возвращается одним нажатием. Сервер шлёт напоминания только по
+    // активным, так что приостановленный замолкает сам собой.
+    recurringPauseBtn.addEventListener("click", async () => {
+      if (!editingRecurringId) return;
+      const payment = allRecurring.find((p) => p.id === editingRecurringId);
+      if (!payment) return;
+
+      const paused = (payment.status || "active") === "paused";
+      await updateDoc(doc(db, "recurring_payments", editingRecurringId), {
+        status: paused ? "active" : "paused",
+      });
+      resetRecurringForm();
+      haptic("success");
+    });
     recurringDeleteBtn.addEventListener("click", async () => {
       if (!editingRecurringId) return;
       const confirmed = await confirmAction("Удалить этот регулярный платёж?");
@@ -3037,6 +3095,11 @@
           authorUid: auth.currentUser.uid,
           createdAt: serverTimestamp(),
         });
+        // Новый платёж активен, а мы могли смотреть приостановленные — иначе он был бы
+        // создан и тут же пропал с экрана.
+        if (currentRecurringStatus !== "active") {
+          document.querySelector('#recurring-status-filter .period-btn[data-status="active"]').click();
+        }
       }
 
       resetRecurringForm();
