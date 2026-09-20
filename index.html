@@ -45,7 +45,11 @@
     .list li {
       display: flex;
       align-items: center;
-      gap: 12px;
+      /* Перенос на вторую строку вместо сжатия: у записи бюджета подпись вроде
+         «≈ 16 042 644 сум · 19 сент. · Билеты» длиннее самой суммы, и на телефоне они
+         рядом не помещаются. Раньше место отвоёвывала подпись, а сумма схлопывалась. */
+      flex-wrap: wrap;
+      gap: 4px 12px;
       min-height: 48px;
       padding: 12px;
       margin-bottom: 8px;
@@ -57,11 +61,22 @@
       height: 24px;
       flex-shrink: 0;
     }
-    .list li .text { flex: 1; min-width: 0; font-size: 16px; overflow-wrap: anywhere; }
+    /* Базис auto, а не ноль: при flex: 1 элемент начинает с нулевой ширины и получает
+       лишь остаток, которого при длинной подписи не остаётся. Нижняя граница в 45%
+       заставляет подпись уехать на свою строку, а не давить соседа. */
+    .list li .text {
+      flex: 1 1 auto;
+      min-width: 45%;
+      font-size: 16px;
+      overflow-wrap: break-word;
+    }
     .list li .due {
+      flex: 0 1 auto;
+      min-width: 0;
+      margin-left: auto;
       font-size: 13px;
       color: var(--tg-theme-hint-color, #999999);
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .empty {
       text-align: center;
@@ -230,7 +245,7 @@
       padding: 10px 8px;
       font-size: 14px;
       border-bottom: 1px solid rgba(127, 127, 127, 0.15);
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     #leaflet-map { flex: 1; min-height: 0; border-radius: 12px; }
     #picked-address {
@@ -270,7 +285,7 @@
       justify-content: space-between;
       gap: 8px;
     }
-    #project-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
+    #project-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: break-word; }
     #project-detail-summary {
       font-size: 15px;
       margin: 4px 0 16px;
@@ -304,7 +319,7 @@
     .status-badge {
       font-size: 12px;
       color: var(--tg-theme-hint-color, #999999);
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     #plan-view-header {
       display: flex;
@@ -312,12 +327,12 @@
       justify-content: space-between;
       gap: 8px;
     }
-    #plan-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: anywhere; }
+    #plan-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: break-word; }
     .plan-meta {
       font-size: 14px;
       color: var(--tg-theme-hint-color, #999999);
       margin: 4px 0 16px;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .option-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
     .option-chip {
@@ -329,7 +344,7 @@
       border-radius: 20px;
       background: var(--tg-theme-secondary-bg-color, #f5f5f5);
       font-size: 13px;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .option-chip button {
       border: none;
@@ -350,7 +365,7 @@
       align-items: center;
       gap: 8px;
       min-width: 0;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .vote-buttons { display: flex; gap: 8px; margin-top: 8px; }
     .vote-btn {
@@ -367,7 +382,7 @@
       font-size: 12px;
       color: var(--tg-theme-hint-color, #999999);
       margin-top: 4px;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .decide-btn {
       width: 100%;
@@ -540,13 +555,13 @@
     .ask-q {
       font-size: 15px;
       font-weight: 600;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
     }
     .ask-a {
       font-size: 15px;
       line-height: 1.5;
       white-space: pre-wrap;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
       padding-left: 12px;
       border-left: 2px solid var(--tg-theme-button-color, #2481cc);
     }
