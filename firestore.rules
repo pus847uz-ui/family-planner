@@ -44,6 +44,12 @@ service cloud.firestore {
       allow read, write: if isFamilyMember();
     }
 
+    // Факты оплат: по записи на каждое нажатие «Оплатил». Копятся, чтобы через несколько
+    // месяцев аналитика опиралась на то, что было, а не на пересчёт сегодняшних условий.
+    match /payment_records/{recordId} {
+      allow read, write: if isFamilyMember();
+    }
+
     // Курсы ЦБ на каждый день. Пишет только плановая функция через Admin SDK — курс
     // официальный, и правка его из приложения означала бы подделку истории трат.
     match /exchange_rates/{date} {

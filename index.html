@@ -476,6 +476,12 @@
       background: var(--tg-theme-button-color, #2481cc);
       color: var(--tg-theme-button-text-color, #ffffff);
     }
+    .meta-row .share-chip { flex: 1; }
+    /* Обязательность выделяется не цветом кнопки, а рамкой: синим уже помечен общий
+       доступ, и две одинаково яркие кнопки рядом спорили бы друг с другом. */
+    .share-chip.mandatory {
+      box-shadow: inset 0 0 0 2px var(--tg-theme-button-color, #2481cc);
+    }
 
     /* Карточка платежа. Прежняя строка «название — всё остальное справа» перестала
        справляться, когда к сумме добавились пересчёт, периодичность, плательщик и замок:
@@ -551,6 +557,59 @@
     .list li.payment-card .payment-next.ending { color: var(--tg-theme-hint-color, #999999); }
     .list li.payment-card.paused .payment-title,
     .list li.payment-card.paused .payment-amount { opacity: 0.55; }
+
+    /* Аналитика. Главное число крупно и без соседей — это ответ на вопрос, с которым
+       сюда заходят; остальное под ним построчно. */
+    .an-hero {
+      padding: 18px;
+      border-radius: 14px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      margin-bottom: 8px;
+    }
+    .an-hero-label { font-size: 13px; color: var(--tg-theme-hint-color, #999999); }
+    .an-hero-value { font-size: 26px; font-weight: 700; margin: 2px 0 12px; }
+    .an-hero-note { font-size: 13px; color: var(--tg-theme-hint-color, #999999); margin-top: 8px; }
+
+    /* Две доли в одной полосе: обязательное и остальное. Отдельные полосы пришлось бы
+       сравнивать глазом, а здесь граница между ними и есть ответ. */
+    .an-split { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: rgba(127, 127, 127, 0.2); }
+    .an-split-part { height: 100%; }
+    .an-split-part.must { background: var(--tg-theme-button-color, #2481cc); }
+    .an-split-part.optional { background: rgba(127, 127, 127, 0.45); }
+
+    .an-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 9px 0;
+      border-bottom: 1px solid rgba(127, 127, 127, 0.15);
+    }
+    .an-row:last-child { border-bottom: none; }
+    .an-row-name { flex: 1; min-width: 0; font-size: 15px; overflow-wrap: break-word; }
+    .an-row-value { font-size: 15px; font-weight: 600; white-space: nowrap; }
+    .an-row-share {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      white-space: nowrap;
+      min-width: 38px;
+      text-align: right;
+    }
+
+    /* Месяц прогноза: подпись, полоса, сумма. Полоса нужна, чтобы спад читался без
+       сравнения чисел — когда платёж заканчивается, это видно по длине. */
+    .an-month {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+    }
+    .an-month-label { font-size: 12px; color: var(--tg-theme-hint-color, #999999); }
+    .an-month-bar { height: 14px; border-radius: 3px; background: rgba(127, 127, 127, 0.15); }
+    .an-month-fill { height: 100%; border-radius: 3px; background: var(--tg-theme-button-color, #2481cc); }
+    .an-month-fill.lower { background: rgba(127, 127, 127, 0.5); }
+    .an-month-value { font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .an-empty { font-size: 14px; color: var(--tg-theme-hint-color, #999999); padding: 6px 0; }
 
     /* Итог по регулярным платежам. Главный вопрос к вкладке, поэтому стоит над списком
        и набран крупнее строк, а не притворяется одной из них. */
@@ -660,7 +719,39 @@
           <span class="home-tile-title">Помощник</span>
           <span class="home-tile-stat">Спросить о планах</span>
         </button>
+        <button type="button" class="home-tile" data-target="analytics">
+          <span class="home-tile-icon">📊</span>
+          <span class="home-tile-title">Аналитика</span>
+          <span class="home-tile-stat" id="home-stat-analytics"></span>
+        </button>
       </div>
+    </section>
+
+    <section id="page-analytics" class="page">
+      <div class="page-title">Аналитика платежей</div>
+
+      <div class="an-hero">
+        <div class="an-hero-label">Сейчас в месяц</div>
+        <div class="an-hero-value" id="an-total">—</div>
+        <div class="an-split" id="an-mandatory-bar"></div>
+        <div class="an-hero-note" id="an-mandatory-note"></div>
+      </div>
+
+      <div class="group-title">Кто сколько платит</div>
+      <div id="an-payers"></div>
+
+      <div class="group-title">Прогноз на год</div>
+      <div id="an-forecast"></div>
+      <div class="field-label" id="an-forecast-note"></div>
+
+      <div class="group-title">Что заканчивается</div>
+      <div id="an-ending"></div>
+
+      <div class="group-title">По периодичности</div>
+      <div id="an-periods"></div>
+
+      <div class="group-title">Что уже оплачено</div>
+      <div id="an-history"></div>
     </section>
 
     <section id="page-assistant" class="page">
@@ -877,12 +968,19 @@
           </div>
 
           <div class="event-form-row">
+            <label>С</label>
+            <input id="recurring-starts" type="date" title="Первый платёж (необязательно)">
+          </div>
+
+          <div class="event-form-row">
             <label>До</label>
             <input id="recurring-ends" type="date" title="Последний платёж (необязательно)">
           </div>
 
+          <select id="recurring-payer" style="width: 100%;"></select>
+
           <div class="meta-row">
-            <select id="recurring-payer"></select>
+            <button type="button" id="recurring-mandatory-btn" class="share-chip mandatory">Обязательный</button>
             <button type="button" id="recurring-shared-btn" class="share-chip">🔒 Только я</button>
           </div>
           <div class="form-actions" id="recurring-form-actions" style="display: none;">
@@ -1219,12 +1317,24 @@
     const recurringMonthSelect = document.getElementById("recurring-month");
     const recurringYearlyDayInput = document.getElementById("recurring-yearly-day");
     const recurringEndsInput = document.getElementById("recurring-ends");
+    const recurringStartsInput = document.getElementById("recurring-starts");
+    const recurringMandatoryBtn = document.getElementById("recurring-mandatory-btn");
     const recurringWhenMonthly = document.getElementById("recurring-when-monthly");
     const recurringWhenWeekly = document.getElementById("recurring-when-weekly");
     const recurringWhenYearly = document.getElementById("recurring-when-yearly");
     const recurringCancelBtn = document.getElementById("recurring-cancel-btn");
     const recurringListEl = document.getElementById("recurring-list");
     const recurringTotalEl = document.getElementById("recurring-total");
+    const homeStatAnalyticsEl = document.getElementById("home-stat-analytics");
+    const anTotalEl = document.getElementById("an-total");
+    const anMandatoryBarEl = document.getElementById("an-mandatory-bar");
+    const anMandatoryNoteEl = document.getElementById("an-mandatory-note");
+    const anPayersEl = document.getElementById("an-payers");
+    const anForecastEl = document.getElementById("an-forecast");
+    const anForecastNoteEl = document.getElementById("an-forecast-note");
+    const anEndingEl = document.getElementById("an-ending");
+    const anPeriodsEl = document.getElementById("an-periods");
+    const anHistoryEl = document.getElementById("an-history");
     const recurringTotalMainEl = document.getElementById("recurring-total-main");
     const recurringTotalPayersEl = document.getElementById("recurring-total-payers");
     const recurringTotalPartsEl = document.getElementById("recurring-total-parts");
@@ -1380,6 +1490,7 @@
       }
 
       if (pageId === "assistant") loadAskHistory();
+      if (pageId === "analytics") renderAnalytics();
       // Пересобираем подраздел бюджета при каждом входе: иначе главная кнопка сохраняла
       // подпись от той вкладки, на которой раздел покинули, и предлагала создать проект
       // поверх списка платежей.
@@ -2576,6 +2687,14 @@
       return btn.classList.contains("shared");
     }
 
+    // Обязательный платёж — тот, от которого нельзя отказаться: квартплата, ипотека,
+    // кредит. Подписки и секции обязательными не считаются, и в аналитике это та самая
+    // граница между «сколько я должен» и «на что могу повлиять».
+    function setMandatory(btn, on) {
+      btn.classList.toggle("mandatory", on);
+      btn.textContent = on ? "Обязательный" : "Необязательный";
+    }
+
     // Плательщик: кто из семьи вносит деньги. Пусто — платим вместе, как было до сих пор.
     function populatePayerSelect(selectEl) {
       const currentValue = selectEl.value;
@@ -2625,6 +2744,7 @@
     let allProjects = [];
     let allEntries = [];
     let allRecurring = [];
+    let allPaymentRecords = [];
     let currentArchiveFilter = "active";
     let activeProjectId = null;
     let currentBudgetSub = "projects";
@@ -3170,6 +3290,11 @@
       });
     });
 
+    recurringMandatoryBtn.addEventListener("click", () => {
+      setMandatory(recurringMandatoryBtn, !recurringMandatoryBtn.classList.contains("mandatory"));
+      haptic();
+    });
+
     async function deleteEntry(entry, currency) {
       // В подтверждении показываем ровно то, по чему человек нажал: в списке дублей
       // «удалить запись» без суммы и комментария не даёт понять, какую именно.
@@ -3446,7 +3571,11 @@
       } else {
         recurringDayInput.value = payment.dueDay || "";
       }
+      recurringStartsInput.value = payment.startsOn || "";
       recurringEndsInput.value = payment.endsOn || "";
+      // Платежи, заведённые до появления пометки, считаем обязательными: занизить
+      // обязательства опаснее, чем завысить.
+      setMandatory(recurringMandatoryBtn, payment.mandatory !== false);
       recurringPayerSelect.value = payment.payerUid || "";
       // Заведённые до появления кнопки считаются общими — так их и показываем.
       setShareChip(recurringSharedBtn, payment.visibility !== "private");
@@ -3464,7 +3593,9 @@
       recurringAmountInput.value = "";
       recurringDayInput.value = "";
       recurringYearlyDayInput.value = "";
+      recurringStartsInput.value = "";
       recurringEndsInput.value = "";
+      setMandatory(recurringMandatoryBtn, true);
       showRecurringPeriod("monthly");
       recurringPayerSelect.value = "";
       setShareChip(recurringSharedBtn, false);
@@ -3481,7 +3612,29 @@
     // другая дата, отметка перестанет совпадать, и платёж снова окажется в списке
     // ожидающих — сам, без сброса вручную.
     async function markPaymentPaid(payment, dueDate) {
-      await updateDoc(doc(db, "recurring_payments", payment.id), { paidFor: dueDate });
+      const currency = payment.currency || BASE_CURRENCY;
+      await Promise.all([
+        updateDoc(doc(db, "recurring_payments", payment.id), { paidFor: dueDate }),
+        // Отдельная запись о самом факте. Отметка в платеже хранит только последнюю
+        // оплату и затирается следующей, а история должна пережить и правку суммы, и
+        // удаление платежа — поэтому условия копируются сюда целиком, а не по ссылке.
+        addDoc(collection(db, "payment_records"), {
+          paymentId: payment.id,
+          title: payment.title,
+          amount: payment.amount,
+          currency,
+          baseAmount: toBaseAmount(payment.amount, currency),
+          baseCurrency: BASE_CURRENCY,
+          dueDate,
+          paidAt: serverTimestamp(),
+          paidMonth: dueDate.slice(0, 7),
+          payerUid: payment.payerUid || null,
+          mandatory: payment.mandatory !== false,
+          period: periodOf(payment),
+          authorUid: auth.currentUser.uid,
+          visibility: payment.visibility === "private" ? "private" : "shared",
+        }),
+      ]);
       haptic("success");
     }
 
@@ -3543,7 +3696,9 @@
         amount,
         currency: getCurrency(recurringCurrencyRow),
         ...schedule,
+        startsOn: recurringStartsInput.value || null,
         endsOn: recurringEndsInput.value || null,
+        mandatory: recurringMandatoryBtn.classList.contains("mandatory"),
         payerUid: recurringPayerSelect.value || null,
         visibility: isShared(recurringSharedBtn) ? "shared" : "private",
       };
@@ -3592,6 +3747,249 @@
       return record.authorUid === auth.currentUser.uid;
     }
 
+    // ---- Аналитика ----
+    // Прогноз считается перебором дней, а не умножением на среднее: в месяце бывает
+    // четыре вторника, а бывает пять, и платёж может закончиться в середине месяца.
+    // Тридцать дней проверки на платёж — дешевле, чем объяснять расхождение в итоге.
+    function countDueInMonth(payment, yearMonth) {
+      const [year, month] = yearMonth.split("-").map(Number);
+      const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      let count = 0;
+      for (let day = 1; day <= days; day += 1) {
+        if (isDueOn(payment, `${yearMonth}-${String(day).padStart(2, "0")}`)) count += 1;
+      }
+      return count;
+    }
+
+    function shiftMonth(yearMonth, delta) {
+      const [year, month] = yearMonth.split("-").map(Number);
+      const shifted = new Date(Date.UTC(year, month - 1 + delta, 1));
+      return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}`;
+    }
+
+    function monthLabel(yearMonth) {
+      return MONTH_NAMES[Number(yearMonth.split("-")[1]) - 1].slice(0, 3);
+    }
+
+    function activePayments() {
+      return allRecurring.filter((p) => (p.status || "active") === "active");
+    }
+
+    // Сумма платежей за конкретный месяц в базовой валюте.
+    function monthTotal(payments, yearMonth) {
+      let total = 0;
+      payments.forEach((payment) => {
+        const times = countDueInMonth(payment, yearMonth);
+        if (times === 0) return;
+        const base = toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY);
+        if (base !== null) total += base * times;
+      });
+      return total;
+    }
+
+    function isMandatory(payment) {
+      // Заведённые до появления пометки считаем обязательными: занизить обязательства
+      // опаснее, чем завысить.
+      return payment.mandatory !== false;
+    }
+
+    function anRow(name, value, share) {
+      const row = document.createElement("div");
+      row.className = "an-row";
+      const nameEl = document.createElement("span");
+      nameEl.className = "an-row-name";
+      nameEl.textContent = name;
+      const valueEl = document.createElement("span");
+      valueEl.className = "an-row-value";
+      valueEl.textContent = value;
+      row.appendChild(nameEl);
+      row.appendChild(valueEl);
+      if (share) {
+        const shareEl = document.createElement("span");
+        shareEl.className = "an-row-share";
+        shareEl.textContent = share;
+        row.appendChild(shareEl);
+      }
+      return row;
+    }
+
+    function fillEmpty(container, text) {
+      const el = document.createElement("div");
+      el.className = "an-empty";
+      el.textContent = text;
+      container.appendChild(el);
+      return el;
+    }
+
+    function renderAnalytics() {
+      const payments = activePayments();
+      const thisMonth = localDateStr(new Date()).slice(0, 7);
+
+      const total = monthTotal(payments, thisMonth);
+      const must = monthTotal(payments.filter(isMandatory), thisMonth);
+      const optional = total - must;
+
+      anTotalEl.textContent = formatAmount(Math.round(total), BASE_CURRENCY);
+
+      anMandatoryBarEl.innerHTML = "";
+      if (total > 0) {
+        [["must", must], ["optional", optional]].forEach(([kind, value]) => {
+          if (value <= 0) return;
+          const part = document.createElement("div");
+          part.className = `an-split-part ${kind}`;
+          part.style.width = `${(value / total) * 100}%`;
+          anMandatoryBarEl.appendChild(part);
+        });
+      }
+      anMandatoryNoteEl.textContent = total > 0
+        ? `Обязательных ${Math.round((must / total) * 100)}% · остальное ${formatAmount(Math.round(optional), BASE_CURRENCY)}`
+        : "Активных платежей нет";
+
+      // Кто сколько платит
+      anPayersEl.innerHTML = "";
+      const byPayer = new Map();
+      payments.forEach((payment) => {
+        const base = toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY);
+        if (base === null) return;
+        const times = countDueInMonth(payment, thisMonth);
+        const key = payment.payerUid || "";
+        byPayer.set(key, (byPayer.get(key) || 0) + base * times);
+      });
+      if (byPayer.size === 0) {
+        fillEmpty(anPayersEl, "Пока не по чему считать");
+      } else {
+        [...byPayer.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([uid, sum]) => {
+            anPayersEl.appendChild(
+              anRow(
+                uid ? assigneeName(uid) : "Вместе",
+                formatAmount(Math.round(sum), BASE_CURRENCY),
+                total > 0 ? `${Math.round((sum / total) * 100)}%` : ""
+              )
+            );
+          });
+      }
+
+      // Прогноз на год вперёд. Точен настолько, насколько точны условия платежей:
+      // периодичность, суммы и сроки известны, гадать ни о чём не приходится.
+      anForecastEl.innerHTML = "";
+      const forecast = [];
+      for (let i = 0; i < 12; i += 1) {
+        const month = shiftMonth(thisMonth, i);
+        forecast.push({ month, total: monthTotal(payments, month) });
+      }
+      const peak = Math.max(...forecast.map((f) => f.total), 1);
+      forecast.forEach(({ month, total: value }) => {
+        const row = document.createElement("div");
+        row.className = "an-month";
+
+        const label = document.createElement("span");
+        label.className = "an-month-label";
+        label.textContent = monthLabel(month);
+
+        const bar = document.createElement("div");
+        bar.className = "an-month-bar";
+        const fill = document.createElement("div");
+        // Месяц легче текущего выделяем приглушённым: именно там нагрузка спадает.
+        fill.className = "an-month-fill" + (value < forecast[0].total ? " lower" : "");
+        fill.style.width = `${(value / peak) * 100}%`;
+        bar.appendChild(fill);
+
+        const amount = document.createElement("span");
+        amount.className = "an-month-value";
+        amount.textContent = formatCompact(value);
+
+        row.appendChild(label);
+        row.appendChild(bar);
+        row.appendChild(amount);
+        anForecastEl.appendChild(row);
+      });
+      anForecastNoteEl.textContent = payments.some((p) => p.endsOn)
+        ? "Спад там, где заканчиваются платежи со сроком"
+        : "Ровно, потому что ни у одного платежа не задан срок окончания";
+
+      // Что заканчивается в пределах года
+      anEndingEl.innerHTML = "";
+      const yearEnd = shiftMonth(thisMonth, 12);
+      const ending = payments
+        .filter((p) => p.endsOn && p.endsOn.slice(0, 7) < yearEnd)
+        .sort((a, b) => a.endsOn.localeCompare(b.endsOn));
+      if (ending.length === 0) {
+        fillEmpty(anEndingEl, "В ближайший год ничего не заканчивается");
+      } else {
+        ending.forEach((payment) => {
+          anEndingEl.appendChild(
+            anRow(payment.title, formatDateHuman(payment.endsOn), "")
+          );
+        });
+      }
+
+      // По периодичности
+      anPeriodsEl.innerHTML = "";
+      const titles = { monthly: "Ежемесячные", weekly: "Еженедельные", yearly: "Годовые" };
+      const byPeriod = new Map();
+      payments.forEach((payment) => {
+        const base = toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY);
+        if (base === null) return;
+        const key = periodOf(payment);
+        byPeriod.set(key, (byPeriod.get(key) || 0) + monthlyCost(payment));
+      });
+      if (byPeriod.size === 0) {
+        fillEmpty(anPeriodsEl, "Активных платежей нет");
+      } else {
+        [...byPeriod.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .forEach(([period, sum]) => {
+            const base = toBaseAmount(sum, BASE_CURRENCY);
+            anPeriodsEl.appendChild(
+              anRow(titles[period] || period, formatAmount(Math.round(base), BASE_CURRENCY), "")
+            );
+          });
+      }
+
+      // История: только факты, без реконструкции задним числом.
+      anHistoryEl.innerHTML = "";
+      if (allPaymentRecords.length === 0) {
+        fillEmpty(
+          anHistoryEl,
+          "Здесь появятся оплаты, отмеченные кнопкой «Оплатил». Пока их нет — история начинается с первой отметки."
+        );
+      } else {
+        const byMonth = new Map();
+        allPaymentRecords.forEach((record) => {
+          const month = record.paidMonth || (record.dueDate || "").slice(0, 7);
+          if (!month) return;
+          const value = typeof record.baseAmount === "number" ? record.baseAmount : 0;
+          byMonth.set(month, (byMonth.get(month) || 0) + value);
+        });
+        [...byMonth.entries()]
+          .sort((a, b) => b[0].localeCompare(a[0]))
+          .slice(0, 12)
+          .forEach(([month, sum]) => {
+            anHistoryEl.appendChild(
+              anRow(
+                `${monthLabel(month)} ${month.slice(0, 4)}`,
+                formatAmount(Math.round(sum), BASE_CURRENCY),
+                ""
+              )
+            );
+          });
+      }
+
+      homeStatAnalyticsEl.textContent = total > 0
+        ? `${formatCompact(total)} в месяц`
+        : "нет платежей";
+    }
+
+    // Миллионы и тысячи словами: в столбце из двенадцати месяцев полные суммы не
+    // помещаются, а сравнивать их нужно на глаз, а не до копейки.
+    function formatCompact(value) {
+      if (value >= 1000000) return `${(value / 1000000).toFixed(1)} млн`;
+      if (value >= 1000) return `${Math.round(value / 1000)} тыс`;
+      return String(Math.round(value));
+    }
+
     function startBudgetListeners() {
       onSnapshot(collection(db, "budget_projects"), (snapshot) => {
         // Проекты остаются общими целиком: закрытый проект с закрытыми тратами внутри —
@@ -3610,6 +4008,11 @@
       onSnapshot(collection(db, "recurring_payments"), (snapshot) => {
         allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isVisibleToMe);
         renderRecurring();
+        renderAnalytics();
+      });
+      onSnapshot(collection(db, "payment_records"), (snapshot) => {
+        allPaymentRecords = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isVisibleToMe);
+        renderAnalytics();
       });
     }
 
@@ -4608,6 +5011,7 @@
         loadExchangeRates().then(() => {
           renderProjects();
           renderRecurring();
+          renderAnalytics();
           if (activeProjectId) renderProjectDetail();
           updateHomeStats();
         });
