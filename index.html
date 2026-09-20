@@ -517,10 +517,34 @@
       color: var(--tg-theme-hint-color, #999999);
       margin-top: 4px;
     }
+    .list li.payment-card .payment-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 8px;
+    }
     .list li.payment-card .payment-next {
       font-size: 13px;
-      margin-top: 6px;
       color: var(--tg-theme-link-color, #2481cc);
+      min-width: 0;
+      overflow-wrap: break-word;
+    }
+    /* Наступивший и просроченный платежи выделены по-разному: первый — дело на сегодня,
+       второй — уже промах, и он должен бросаться в глаза сильнее. */
+    .list li.payment-card .payment-next.due-now { font-weight: 600; }
+    .list li.payment-card .payment-next.overdue {
+      color: var(--tg-theme-destructive-text-color, #e53935);
+      font-weight: 600;
+    }
+    .list li.payment-card .paid-btn {
+      flex-shrink: 0;
+      border: none;
+      border-radius: 8px;
+      padding: 7px 14px;
+      font-size: 13px;
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
     }
     /* Истекающий срок — единственное, о чём стоит предупредить в списке: платёж ещё
        виден, но скоро замолчит сам, и это лучше заметить заранее. */
@@ -2719,6 +2743,39 @@
       return null;
     }
 
+    function prevDueDate(payment, untilIsoDate) {
+      let date = untilIsoDate;
+      for (let i = 0; i <= 366; i += 1) {
+        if (isDueOn(payment, date)) return date;
+        date = isoAddDays(date, -1);
+      }
+      return null;
+    }
+
+    // Состояние платежа на сегодня. Отметка об оплате хранит дату самого платежа, а не
+    // момент нажатия: заплатив заранее, человек отмечает будущий платёж, и он не должен
+    // выглядеть как оплата прошлого периода.
+    function paymentState(payment, today) {
+      if (payment.status === "paused") return { kind: "paused" };
+
+      const due = prevDueDate(payment, today);
+      // Наступивший платёж, который не отметили оплаченным, — главное, что нужно видеть
+      // в списке: сегодня заплатить или уже опоздали.
+      if (due && payment.paidFor !== due) {
+        if (due === today) return { kind: "due", date: due };
+        // Просрочку показываем только тем платежам, которые уже отмечали хоть раз. Иначе
+        // в день появления этой кнопки всё заведённое раньше вспыхнуло бы красным: люди
+        // платили, просто отмечать было негде.
+        if (payment.paidFor) return { kind: "overdue", date: due };
+      }
+
+      // Всё наступившее оплачено — показываем, когда следующий. Ищем со следующего дня,
+      // иначе сегодняшний оплаченный платёж нашёлся бы снова.
+      const next = nextDueDate(payment, isoAddDays(today, 1));
+      if (!next) return { kind: "ended", date: payment.endsOn };
+      return { kind: "upcoming", date: next, paidFor: due };
+    }
+
     // Еженедельный платёж — это 52 платежа в год, а не четыре в месяц: наивный счёт
     // занизил бы итог почти на десятую часть.
     function monthlyCost(payment) {
@@ -3271,12 +3328,13 @@
 
       payments
         .slice()
-        // Сортируем по ближайшему платежу, а не по числу месяца: с разными
-        // периодичностями число ничего не значит, а «что списывается раньше» —
-        // единственный порядок, в котором список читают.
-        .map((payment) => ({ payment, next: nextDueDate(payment, today) }))
-        .sort((a, b) => (a.next || "9999").localeCompare(b.next || "9999"))
-        .forEach(({ payment, next }) => {
+        // Порядок по дате состояния: у просроченного она в прошлом, у сегодняшнего —
+        // сегодня, у будущего — впереди, поэтому нужное само всплывает наверх. Число
+        // месяца для этого не годится: с разными периодичностями оно ничего не значит,
+        // а приостановленные и закончившиеся даты не имеют и уходят в конец.
+        .map((payment) => ({ payment, state: paymentState(payment, today) }))
+        .sort((a, b) => (a.state.date || "9999").localeCompare(b.state.date || "9999"))
+        .forEach(({ payment, state }) => {
           const currency = payment.currency || BASE_CURRENCY;
           const li = document.createElement("li");
           li.className = "payment-card" + (payment.status === "paused" ? " paused" : "");
@@ -3307,22 +3365,45 @@
           metaEl.textContent = meta.join(" · ");
           li.appendChild(metaEl);
 
+          const footer = document.createElement("div");
+          footer.className = "payment-footer";
+
           const nextEl = document.createElement("div");
-          if (payment.status === "paused") {
-            nextEl.className = "payment-next ending";
+          nextEl.className = "payment-next";
+          if (state.kind === "paused") {
+            nextEl.classList.add("ending");
             nextEl.textContent = "Приостановлен";
-          } else if (!next) {
-            nextEl.className = "payment-next ending";
-            nextEl.textContent = payment.endsOn ? `Закончился ${formatDateHuman(payment.endsOn)}` : "Платежей больше нет";
+          } else if (state.kind === "ended") {
+            nextEl.classList.add("ending");
+            nextEl.textContent = state.date ? `Закончился ${formatDateHuman(state.date)}` : "Платежей больше нет";
+          } else if (state.kind === "due") {
+            nextEl.classList.add("due-now");
+            nextEl.textContent = "Платёж сегодня";
+          } else if (state.kind === "overdue") {
+            nextEl.classList.add("overdue");
+            nextEl.textContent = `Не оплачен с ${formatDateHuman(state.date)}`;
           } else {
-            const isToday = next === today;
-            nextEl.className = "payment-next";
-            nextEl.textContent = isToday ? "Платёж сегодня" : `Следующий ${formatDateHuman(next)}`;
-            if (payment.endsOn) {
-              nextEl.textContent += ` · до ${formatDateHuman(payment.endsOn)}`;
-            }
+            nextEl.textContent = `Следующий ${formatDateHuman(state.date)}`;
+            if (payment.endsOn) nextEl.textContent += ` · до ${formatDateHuman(payment.endsOn)}`;
           }
-          li.appendChild(nextEl);
+          footer.appendChild(nextEl);
+
+          // Кнопка появляется только когда есть что отметить. Постоянная «оплачено» на
+          // каждой карточке превратилась бы в шум, по которому легко промахнуться.
+          if (state.kind === "due" || state.kind === "overdue") {
+            const payBtn = document.createElement("button");
+            payBtn.type = "button";
+            payBtn.className = "paid-btn";
+            payBtn.textContent = "Оплатил";
+            payBtn.addEventListener("click", (event) => {
+              // Иначе нажатие дойдёт до карточки и откроет форму правки.
+              event.stopPropagation();
+              markPaymentPaid(payment, state.date);
+            });
+            footer.appendChild(payBtn);
+          }
+
+          li.appendChild(footer);
 
           recurringListEl.appendChild(li);
         });
@@ -3374,6 +3455,14 @@
     }
 
     recurringCancelBtn.addEventListener("click", resetRecurringForm);
+
+    // Отметка хранит дату платежа, а не момент нажатия: в следующем месяце наступит
+    // другая дата, отметка перестанет совпадать, и платёж снова окажется в списке
+    // ожидающих — сам, без сброса вручную.
+    async function markPaymentPaid(payment, dueDate) {
+      await updateDoc(doc(db, "recurring_payments", payment.id), { paidFor: dueDate });
+      haptic("success");
+    }
 
     // Пауза вместо удаления: отключил подписку на пару месяцев — платёж остаётся со своей
     // суммой и числом, и возвращается одним нажатием. Сервер шлёт напоминания только по

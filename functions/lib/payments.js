@@ -56,6 +56,24 @@ function nextPaymentDate(payment, fromIsoDate, addDaysToDateStr) {
   return null;
 }
 
+// Последний наступивший платёж, не позже указанной даты. Нужен, чтобы отличить
+// «ещё не пора» от «пора было и не оплачено».
+function previousPaymentDate(payment, untilIsoDate, addDaysToDateStr) {
+  let date = untilIsoDate;
+  for (let i = 0; i <= 366; i += 1) {
+    if (isPaymentDueOn(payment, date)) return date;
+    date = addDaysToDateStr(date, -1);
+  }
+  return null;
+}
+
+// Платёж за этот срок уже отмечен оплаченным. Отметка хранит дату самого платежа, а не
+// момент нажатия: иначе оплата, внесённая заранее, выглядела бы как оплата прошлого
+// периода, и напоминание пришло бы снова.
+function isPaidFor(payment, dueIsoDate) {
+  return Boolean(dueIsoDate) && payment.paidFor === dueIsoDate;
+}
+
 // Во что платёж обходится в месяц. Нужно для общего итога: складывать еженедельный
 // платёж с годовым напрямую бессмысленно.
 function monthlyCost(payment, amount) {
@@ -69,5 +87,7 @@ module.exports = {
   isWithinTerm,
   isPaymentDueOn,
   nextPaymentDate,
+  previousPaymentDate,
+  isPaidFor,
   monthlyCost,
 };

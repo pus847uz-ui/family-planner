@@ -24,7 +24,7 @@ const {
   addDaysToDateStr,
   formatDueDate,
 } = require("./lib/dates");
-const { isPaymentDueOn, periodOf, monthlyCost } = require("./lib/payments");
+const { isPaymentDueOn, isPaidFor, periodOf, monthlyCost } = require("./lib/payments");
 const { sendTelegramMessage, callTelegramApi, buildTopicLink, answerCallback } = require("./lib/telegram");
 const { getUserName } = require("./lib/users");
 const {
@@ -449,7 +449,12 @@ exports.sendRecurringPaymentReminders = onSchedule(
       const updates = {};
       let messageText = null;
 
-      if (isPaymentDueOn(payment, today) && payment.remindedDueDate !== today) {
+      if (
+        isPaymentDueOn(payment, today) &&
+        payment.remindedDueDate !== today &&
+        // Отметили оплату — напоминать не о чем. Ровно ради этого отметка и нужна.
+        !isPaidFor(payment, today)
+      ) {
         messageText = `Сегодня платёж «${payment.title}» — ${amount}`;
         updates.remindedDueDate = today;
       } else if (
@@ -457,7 +462,8 @@ exports.sendRecurringPaymentReminders = onSchedule(
         // слились бы в два сообщения на каждую неделю, и читать перестали бы оба.
         periodOf(payment) !== "weekly" &&
         isPaymentDueOn(payment, soon) &&
-        payment.remindedWarnDate !== soon
+        payment.remindedWarnDate !== soon &&
+        !isPaidFor(payment, soon)
       ) {
         messageText = `Через ${RECURRING_REMINDER_DAYS_BEFORE} дня платёж «${payment.title}» — ${amount}`;
         updates.remindedWarnDate = soon;
