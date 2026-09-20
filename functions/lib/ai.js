@@ -111,10 +111,19 @@ async function buildContext(uid) {
       .filter((p) => !isClosedStatus(p.type, p.status))
       .slice(0, LIMIT)
       .map((p) => ({ title: p.title, type: PLAN_TYPE_TITLE[p.type] || p.type })),
-    payments: paymentsSnap.docs.slice(0, LIMIT).map((d) => {
-      const p = d.data();
-      return { title: p.title, amount: p.amount, currency: p.currency, dueDay: p.dueDay };
-    }),
+    // Личный платёж видит только тот, кто его завёл. Отсутствие пометки означает общий:
+    // всё, что было заведено до появления этой кнопки, остаётся видно обоим.
+    payments: paymentsSnap.docs
+      .map((d) => d.data())
+      .filter((p) => p.visibility !== "private" || String(p.authorUid) === String(uid))
+      .slice(0, LIMIT)
+      .map((p) => ({
+        title: p.title,
+        amount: p.amount,
+        currency: p.currency,
+        dueDay: p.dueDay,
+        payer: nameOf(usersById, p.payerUid),
+      })),
   };
 }
 
@@ -160,9 +169,10 @@ function formatContext(ctx) {
 
   if (ctx.payments.length > 0) {
     lines.push("", "Регулярные платежи:");
-    ctx.payments.forEach((p) =>
-      lines.push(`- ${p.title}: ${p.amount} ${p.currency || ""}, ${p.dueDay} числа`)
-    );
+    ctx.payments.forEach((p) => {
+      const payer = p.payer ? `, платит ${p.payer}` : "";
+      lines.push(`- ${p.title}: ${p.amount} ${p.currency || ""}, ${p.dueDay} числа${payer}`);
+    });
   }
 
   if (lines.length === 1) lines.push("", "Записей в планировщике сейчас нет.");

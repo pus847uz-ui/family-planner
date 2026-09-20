@@ -422,6 +422,27 @@
     .group-title:first-child { margin-top: 4px; }
     .group-title.overdue { color: var(--tg-theme-destructive-text-color, #e53935); }
 
+    /* Плательщик и доступ — одной строкой: оба признака ставятся заодно с суммой, иначе
+       про них просто забудут. */
+    .meta-row { display: flex; gap: 8px; align-items: stretch; }
+    .meta-row select { flex: 1; min-width: 0; }
+    .share-chip {
+      flex-shrink: 0;
+      border: none;
+      border-radius: 10px;
+      padding: 0 14px;
+      font-size: 14px;
+      white-space: nowrap;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+      color: var(--tg-theme-text-color, #111111);
+    }
+    /* Открытая запись выделена, закрытая — обычная: общий доступ это осознанное
+       действие, и видно должно быть именно его. */
+    .share-chip.shared {
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+    }
+
     /* Итог по регулярным платежам. Главный вопрос к вкладке, поэтому стоит над списком
        и набран крупнее строк, а не притворяется одной из них. */
     .recurring-total {
@@ -698,6 +719,10 @@
             <select id="entry-currency"></select>
           </div>
           <input id="entry-comment" type="text" placeholder="Комментарий / #хэштег (необязательно)">
+          <div class="meta-row">
+            <select id="entry-payer"></select>
+            <button type="button" id="entry-shared-btn" class="share-chip">🔒 Только я</button>
+          </div>
           <div class="entry-buttons">
             <button type="button" id="entry-income-btn" class="entry-btn income">+ Доход</button>
             <button type="button" id="entry-expense-btn" class="entry-btn expense">− Расход</button>
@@ -721,6 +746,10 @@
             <select id="recurring-currency"></select>
           </div>
           <input id="recurring-day" type="number" min="1" max="31" placeholder="День месяца (1–31)">
+          <div class="meta-row">
+            <select id="recurring-payer"></select>
+            <button type="button" id="recurring-shared-btn" class="share-chip">🔒 Только я</button>
+          </div>
           <div class="form-actions" id="recurring-form-actions" style="display: none;">
             <button type="button" id="recurring-delete-btn" class="text-btn danger">Удалить платёж</button>
             <button type="button" id="recurring-cancel-btn" class="text-btn">Отмена</button>
@@ -1017,6 +1046,10 @@
     const projectDetailSummaryEl = document.getElementById("project-detail-summary");
     const entryAmountInput = document.getElementById("entry-amount");
     const entryCurrencySelect = document.getElementById("entry-currency");
+    const entryPayerSelect = document.getElementById("entry-payer");
+    const entrySharedBtn = document.getElementById("entry-shared-btn");
+    const recurringPayerSelect = document.getElementById("recurring-payer");
+    const recurringSharedBtn = document.getElementById("recurring-shared-btn");
     const entryRateHintEl = document.getElementById("entry-rate-hint");
     const entryCommentInput = document.getElementById("entry-comment");
     const entryIncomeBtn = document.getElementById("entry-income-btn");
@@ -1474,6 +1507,8 @@
         populateAssigneeSelect(taskAssigneeSelect);
         populateAssigneeSelect(shoppingAssigneeSelect);
         populateAssigneeSelect(mealMenuAssigneeSelect);
+        populatePayerSelect(entryPayerSelect);
+        populatePayerSelect(recurringPayerSelect);
         // фильтры строятся из списка участников, а списки показывают их имена
         renderPersonFilter();
         renderTasksList();
@@ -2347,6 +2382,33 @@
     const BASE_CURRENCY = "UZS";
     const CURRENCIES = { UZS: "сум", USD: "$", EUR: "€", RUB: "₽" };
 
+    // Кнопка доступа. Новая запись закрыта: человек planning'ует свои траты, и пока он
+    // сам не открыл их, второй их не видит. Открыть и закрыть обратно можно в любой
+    // момент — закрытие честно предупреждает, что увиденного уже не вернуть.
+    const SHARE_LABEL = { shared: "👥 Видно обоим", private: "🔒 Только я" };
+
+    function setShareChip(btn, shared) {
+      btn.classList.toggle("shared", shared);
+      btn.textContent = shared ? SHARE_LABEL.shared : SHARE_LABEL.private;
+    }
+
+    function isShared(btn) {
+      return btn.classList.contains("shared");
+    }
+
+    // Плательщик: кто из семьи вносит деньги. Пусто — платим вместе, как было до сих пор.
+    function populatePayerSelect(selectEl) {
+      const currentValue = selectEl.value;
+      selectEl.innerHTML = '<option value="">Платим вместе</option>';
+      allFamilyUsers.forEach((user) => {
+        const opt = document.createElement("option");
+        opt.value = user.id;
+        opt.textContent = user.name || user.id;
+        selectEl.appendChild(opt);
+      });
+      selectEl.value = currentValue;
+    }
+
     // Курс на сегодня. Держим в памяти на всю сессию: официальный курс внутри дня не
     // меняется, а запрашивать его на каждую трату — лишний круг до сервера в момент,
     // когда человек ждёт сохранения.
@@ -2491,6 +2553,8 @@
       // а поменять на другую можно тут же, рядом с суммой.
       const project = allProjects.find((p) => p.id === projectId);
       entryCurrencySelect.value = (project && project.currency) || BASE_CURRENCY;
+      entryPayerSelect.value = "";
+      setShareChip(entrySharedBtn, false);
       updateEntryRateHint();
       tg.MainButton.hide();
       tg.BackButton.show();
@@ -2571,6 +2635,10 @@
             if (entry.createdAt) {
               meta.push(entry.createdAt.toDate().toLocaleDateString("ru-RU", { day: "numeric", month: "short" }));
             }
+            if (entry.payerUid) meta.push(assigneeName(entry.payerUid));
+            // Замок только на своих закрытых: чужих здесь и так не бывает, а без пометки
+            // непонятно, видит ли вторая половина эту трату.
+            if (entry.visibility === "private") meta.push("🔒");
             if (entry.comment) meta.push(entry.comment);
 
             if (meta.length > 0) {
@@ -2672,6 +2740,8 @@
         amount,
         currency,
         type,
+        payerUid: entryPayerSelect.value || null,
+        visibility: isShared(entrySharedBtn) ? "shared" : "private",
         // Курс запоминается вместе с тратой и больше не пересчитывается: покупка,
         // сделанная в январе, должна остаться той суммой в сумах, какой была тогда,
         // иначе история бюджета менялась бы сама при каждом скачке курса.
@@ -2715,6 +2785,13 @@
 
     entryAmountInput.addEventListener("input", updateEntryRateHint);
     entryCurrencySelect.addEventListener("change", updateEntryRateHint);
+
+    [entrySharedBtn, recurringSharedBtn].forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setShareChip(btn, !isShared(btn));
+        haptic();
+      });
+    });
 
     entryIncomeBtn.addEventListener("click", () => addEntry("income"));
     entryExpenseBtn.addEventListener("click", () => addEntry("expense"));
@@ -2823,6 +2900,8 @@
             if (base !== null) parts.push(`≈ ${formatAmount(Math.round(base), BASE_CURRENCY)}`);
           }
           parts.push(`${payment.dueDay} числа`);
+          if (payment.payerUid) parts.push(assigneeName(payment.payerUid));
+          if (payment.visibility === "private") parts.push("🔒");
           due.textContent = parts.join(" · ");
 
           li.appendChild(text);
@@ -2835,8 +2914,11 @@
       editingRecurringId = payment.id;
       recurringTitleInput.value = payment.title;
       recurringAmountInput.value = payment.amount;
-      recurringCurrencySelect.value = payment.currency || "USD";
+      recurringCurrencySelect.value = payment.currency || BASE_CURRENCY;
       recurringDayInput.value = payment.dueDay;
+      recurringPayerSelect.value = payment.payerUid || "";
+      // Заведённые до появления кнопки считаются общими — так их и показываем.
+      setShareChip(recurringSharedBtn, payment.visibility !== "private");
       recurringFormActions.style.display = "flex";
       tg.MainButton.setText("Сохранить платёж");
       tg.BackButton.show();
@@ -2848,6 +2930,8 @@
       recurringTitleInput.value = "";
       recurringAmountInput.value = "";
       recurringDayInput.value = "";
+      recurringPayerSelect.value = "";
+      setShareChip(recurringSharedBtn, false);
       recurringFormActions.style.display = "none";
       if (currentPage === "budget" && !activeProjectId) {
         tg.MainButton.setText(pages.budget.mainButtonText);
@@ -2874,7 +2958,14 @@
         return;
       }
 
-      const data = { title, amount, currency: recurringCurrencySelect.value, dueDay };
+      const data = {
+        title,
+        amount,
+        currency: recurringCurrencySelect.value,
+        dueDay,
+        payerUid: recurringPayerSelect.value || null,
+        visibility: isShared(recurringSharedBtn) ? "shared" : "private",
+      };
 
       if (editingRecurringId) {
         // Отметки об отправленных напоминаниях сбрасываем только когда переехал день
@@ -2899,21 +2990,35 @@
       haptic("success");
     }
 
+    // Личную запись видит только тот, кто её завёл. Отсутствие поля означает общую: всё,
+    // что накопилось до появления этой кнопки, остаётся видно обоим.
+    //
+    // Фильтр стоит в коде, а не в правилах Firestore. Правила не отсеивают документы, а
+    // разрешают или запрещают запрос целиком, поэтому настоящая приватность потребовала
+    // бы двух слушателей и составных индексов. Для двоих это лишняя сложность: приватность
+    // здесь нужна в смысле «не мозолит глаза», и решение осознанное.
+    function isVisibleToMe(record) {
+      if (record.visibility !== "private") return true;
+      return record.authorUid === auth.currentUser.uid;
+    }
+
     function startBudgetListeners() {
       onSnapshot(collection(db, "budget_projects"), (snapshot) => {
+        // Проекты остаются общими целиком: закрытый проект с закрытыми тратами внутри —
+        // это два уровня доступа и заметно более путаный экран.
         allProjects = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderProjects();
         if (activeProjectId) renderProjectDetail();
         updateHomeStats();
       });
       onSnapshot(collection(db, "budget_entries"), (snapshot) => {
-        allEntries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        allEntries = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isVisibleToMe);
         renderProjects();
         if (activeProjectId) renderProjectDetail();
         updateHomeStats();
       });
       onSnapshot(collection(db, "recurring_payments"), (snapshot) => {
-        allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        allRecurring = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isVisibleToMe);
         renderRecurring();
       });
     }
