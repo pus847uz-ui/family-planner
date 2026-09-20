@@ -558,6 +558,43 @@
     .list li.payment-card.paused .payment-title,
     .list li.payment-card.paused .payment-amount { opacity: 0.55; }
 
+    /* Желание. Дата загадывания — часть содержания, а не служебная пометка: в этом
+       списке важно не только что хочется, но и как давно. */
+    .wish-card {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      padding: 12px 14px;
+      margin-bottom: 8px;
+      border-radius: 12px;
+      background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+    }
+    .wish-check {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+    .wish-body { flex: 1; min-width: 0; }
+    .wish-text {
+      font-size: 16px;
+      overflow-wrap: break-word;
+    }
+    .wish-card.done .wish-text { color: var(--tg-theme-hint-color, #999999); }
+    .wish-meta {
+      font-size: 13px;
+      color: var(--tg-theme-hint-color, #999999);
+      margin-top: 3px;
+      overflow-wrap: break-word;
+    }
+    /* Сколько шло к исполнению — ради этой строки список и ведут, поэтому она не серая
+       и стоит отдельно от прочих пометок. */
+    .wish-elapsed {
+      font-size: 13px;
+      margin-top: 5px;
+      color: var(--tg-theme-link-color, #2481cc);
+    }
+
     /* Аналитика. Главное число крупно и без соседей — это ответ на вопрос, с которым
        сюда заходят; остальное под ним построчно. */
     .an-hero {
@@ -731,7 +768,36 @@
           <span class="home-tile-title">Аналитика</span>
           <span class="home-tile-stat" id="home-stat-analytics"></span>
         </button>
+        <button type="button" class="home-tile" data-target="wishes">
+          <span class="home-tile-icon">✨</span>
+          <span class="home-tile-title">Желания</span>
+          <span class="home-tile-stat" id="home-stat-wishes"></span>
+        </button>
       </div>
+    </section>
+
+    <section id="page-wishes" class="page">
+      <div class="page-title">Желания</div>
+
+      <div class="event-form">
+        <input id="wish-text" type="text" placeholder="Чего хочется?">
+        <div class="meta-row" id="wish-owner-row"></div>
+        <div class="event-form-row">
+          <label>Когда</label>
+          <input id="wish-target" type="date" title="Когда хочется (необязательно)">
+        </div>
+        <div class="form-actions" id="wish-form-actions" style="display: none;">
+          <button type="button" id="wish-delete-btn" class="text-btn danger">Удалить</button>
+          <button type="button" id="wish-cancel-btn" class="text-btn">Отмена</button>
+        </div>
+      </div>
+
+      <div class="period-toggle" id="wish-filter">
+        <button type="button" class="period-btn active" data-wish="open">Загаданные</button>
+        <button type="button" class="period-btn" data-wish="done">Сбывшиеся</button>
+      </div>
+
+      <div id="wishes-list"></div>
     </section>
 
     <section id="page-analytics" class="page">
@@ -1334,6 +1400,14 @@
     const recurringListEl = document.getElementById("recurring-list");
     const recurringTotalEl = document.getElementById("recurring-total");
     const homeStatAnalyticsEl = document.getElementById("home-stat-analytics");
+    const homeStatWishesEl = document.getElementById("home-stat-wishes");
+    const wishTextInput = document.getElementById("wish-text");
+    const wishTargetInput = document.getElementById("wish-target");
+    const wishOwnerRow = document.getElementById("wish-owner-row");
+    const wishFormActions = document.getElementById("wish-form-actions");
+    const wishDeleteBtn = document.getElementById("wish-delete-btn");
+    const wishCancelBtn = document.getElementById("wish-cancel-btn");
+    const wishesListEl = document.getElementById("wishes-list");
     const anTotalEl = document.getElementById("an-total");
     const anMandatoryBarEl = document.getElementById("an-mandatory-bar");
     const anMandatoryNoteEl = document.getElementById("an-mandatory-note");
@@ -1451,6 +1525,7 @@
       trips: { mainButtonText: "Создать поездку", add: createTrip },
       leisure: { mainButtonText: "Предложить активность", add: createLeisure },
       meals: { mainButtonText: "Запланировать приём пищи", add: createMeal },
+      wishes: { mainButtonText: "Добавить желание", add: saveWish },
     };
 
     function navigateTo(pageId) {
@@ -1475,6 +1550,9 @@
       }
       if (currentPage === "meals" && pageId !== "meals" && activeMealId) {
         closeMealDetail();
+      }
+      if (currentPage === "wishes" && pageId !== "wishes" && editingWishId) {
+        resetWishForm();
       }
       currentPage = pageId;
       document.querySelectorAll(".page").forEach((el) => {
@@ -1786,6 +1864,8 @@
         populateAssigneeSelect(mealMenuAssigneeSelect);
         populatePayerSelect(entryPayerSelect);
         populatePayerSelect(recurringPayerSelect);
+        buildWishOwnerRow();
+        renderWishes();
         // Разбивка по плательщикам подписана именами, а они приходят этим же слушателем —
         // без перерисовки на их месте до перехода по разделам стояли бы telegram id.
         renderRecurring();
@@ -3756,6 +3836,243 @@
       return record.authorUid === auth.currentUser.uid;
     }
 
+    // ---- Желания ----
+    let allWishes = [];
+    let editingWishId = null;
+    let currentWishFilter = "open";
+    // Пустая строка — общее желание. Тот же приём, что у плательщика: выбор обязателен,
+    // но «ничьё» здесь означает не отсутствие, а «наше общее».
+    let currentWishOwner = "";
+
+    function pluralRu(count, one, few, many) {
+      const mod10 = count % 10;
+      const mod100 = count % 100;
+      if (mod10 === 1 && mod100 !== 11) return one;
+      if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+      return many;
+    }
+
+    // Сколько шло от загадывания до исполнения. Округляем крупно: разница между
+    // «сто двадцать три дня» и «четыре месяца» в этом списке не значит ничего, а
+    // читается второе куда легче.
+    function formatElapsed(fromMs, toMs) {
+      const days = Math.max(0, Math.round((toMs - fromMs) / 86400000));
+      if (days === 0) return "в тот же день";
+      if (days < 45) return `за ${days} ${pluralRu(days, "день", "дня", "дней")}`;
+      const months = Math.round(days / 30.44);
+      if (months < 12) return `за ${months} ${pluralRu(months, "месяц", "месяца", "месяцев")}`;
+      const years = Math.round(months / 12);
+      // «За год» звучит по-человечески, «за 1 год» — как заполненная анкета.
+      if (years === 1) return "за год";
+      return `за ${years} ${pluralRu(years, "год", "года", "лет")}`;
+    }
+
+    function buildWishOwnerRow() {
+      wishOwnerRow.innerHTML = "";
+      const options = allFamilyUsers.map((user) => ({ id: user.id, name: user.name || user.id }));
+      options.push({ id: "", name: "Вместе" });
+
+      options.forEach((option) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "share-chip";
+        btn.dataset.owner = option.id;
+        btn.textContent = option.name;
+        btn.addEventListener("click", () => {
+          setWishOwner(option.id);
+          haptic();
+        });
+        wishOwnerRow.appendChild(btn);
+      });
+      setWishOwner(currentWishOwner);
+    }
+
+    function setWishOwner(ownerUid) {
+      currentWishOwner = ownerUid;
+      wishOwnerRow.querySelectorAll(".share-chip").forEach((btn) => {
+        btn.classList.toggle("shared", btn.dataset.owner === ownerUid);
+      });
+    }
+
+    function wishOwnerLabel(wish) {
+      return wish.ownerUid ? assigneeName(wish.ownerUid) : "Общее";
+    }
+
+    async function saveWish() {
+      const text = wishTextInput.value.trim();
+      if (!text) {
+        haptic("error");
+        wishTextInput.focus();
+        return;
+      }
+
+      const data = {
+        text,
+        ownerUid: currentWishOwner || null,
+        targetDate: wishTargetInput.value || null,
+        lastEditedBy: auth.currentUser.uid,
+      };
+
+      if (editingWishId) {
+        await updateDoc(doc(db, "wishes", editingWishId), data);
+      } else {
+        await addDoc(collection(db, "wishes"), {
+          ...data,
+          status: "open",
+          doneAt: null,
+          authorUid: auth.currentUser.uid,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      resetWishForm();
+      haptic("success");
+    }
+
+    function startEditWish(wish) {
+      editingWishId = wish.id;
+      wishTextInput.value = wish.text;
+      wishTargetInput.value = wish.targetDate || "";
+      setWishOwner(wish.ownerUid || "");
+      wishFormActions.style.display = "flex";
+      tg.MainButton.setText("Сохранить желание");
+      tg.BackButton.show();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function resetWishForm() {
+      editingWishId = null;
+      wishTextInput.value = "";
+      wishTargetInput.value = "";
+      // Новое желание по умолчанию своё: чаще всего его загадывает тот, кто записывает.
+      setWishOwner(auth.currentUser ? auth.currentUser.uid : "");
+      wishFormActions.style.display = "none";
+      if (currentPage === "wishes") {
+        tg.MainButton.setText(pages.wishes.mainButtonText);
+        tg.MainButton.show();
+      }
+    }
+
+    async function toggleWishDone(wish) {
+      const done = wish.status === "done";
+      await updateDoc(doc(db, "wishes", wish.id), {
+        status: done ? "open" : "done",
+        // Снимая отметку, убираем и дату исполнения — иначе она осталась бы висеть и
+        // при следующем исполнении срок посчитался бы от старой.
+        doneAt: done ? null : serverTimestamp(),
+      });
+      haptic("success");
+    }
+
+    function buildWishCard(wish) {
+      const card = document.createElement("div");
+      const done = wish.status === "done";
+      card.className = "wish-card" + (done ? " done" : "");
+
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.className = "wish-check";
+      check.checked = done;
+      check.addEventListener("click", (event) => event.stopPropagation());
+      check.addEventListener("change", () => toggleWishDone(wish));
+
+      const body = document.createElement("div");
+      body.className = "wish-body";
+
+      const text = document.createElement("div");
+      text.className = "wish-text";
+      text.textContent = wish.text;
+      body.appendChild(text);
+
+      const meta = [wishOwnerLabel(wish)];
+      if (wish.targetDate && !done) meta.push(`хочется к ${formatDateHuman(wish.targetDate)}`);
+      if (wish.createdAt) meta.push(`загадано ${formatDateHuman(localDateStr(wish.createdAt.toDate()))}`);
+
+      const metaEl = document.createElement("div");
+      metaEl.className = "wish-meta";
+      metaEl.textContent = meta.join(" · ");
+      body.appendChild(metaEl);
+
+      if (done && wish.createdAt && wish.doneAt) {
+        const elapsed = document.createElement("div");
+        elapsed.className = "wish-elapsed";
+        elapsed.textContent = `Сбылось ${formatDateHuman(localDateStr(wish.doneAt.toDate()))} — ${formatElapsed(
+          wish.createdAt.toMillis(),
+          wish.doneAt.toMillis()
+        )}`;
+        body.appendChild(elapsed);
+      }
+
+      card.appendChild(check);
+      card.appendChild(body);
+      body.addEventListener("click", () => startEditWish(wish));
+      return card;
+    }
+
+    function renderWishes() {
+      wishesListEl.innerHTML = "";
+      const visible = allWishes.filter((wish) =>
+        currentWishFilter === "done" ? wish.status === "done" : wish.status !== "done"
+      );
+
+      if (visible.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = currentWishFilter === "done"
+          ? "Пока ничего не сбылось"
+          : "Список пуст — чего бы вам хотелось?";
+        wishesListEl.appendChild(empty);
+      } else {
+        visible
+          .slice()
+          .sort((a, b) => {
+            if (currentWishFilter === "done") {
+              // Сбывшиеся — свежие сверху, это лента достижений.
+              return (b.doneAt?.toMillis() || 0) - (a.doneAt?.toMillis() || 0);
+            }
+            // Загаданные: сначала те, у которых есть срок, по его близости.
+            const byTarget = (a.targetDate || "9999").localeCompare(b.targetDate || "9999");
+            if (byTarget !== 0) return byTarget;
+            return (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0);
+          })
+          .forEach((wish) => wishesListEl.appendChild(buildWishCard(wish)));
+      }
+
+      const openCount = allWishes.filter((w) => w.status !== "done").length;
+      homeStatWishesEl.textContent = openCount > 0
+        ? `${openCount} ${pluralRu(openCount, "загадано", "загадано", "загадано")}`
+        : "пока пусто";
+    }
+
+    document.querySelectorAll("#wish-filter .period-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentWishFilter = btn.dataset.wish;
+        document.querySelectorAll("#wish-filter .period-btn").forEach((b) => {
+          b.classList.toggle("active", b === btn);
+        });
+        if (editingWishId) resetWishForm();
+        renderWishes();
+      });
+    });
+
+    wishCancelBtn.addEventListener("click", resetWishForm);
+
+    wishDeleteBtn.addEventListener("click", async () => {
+      if (!editingWishId) return;
+      const confirmed = await confirmAction("Удалить желание?");
+      if (!confirmed) return;
+      await deleteDoc(doc(db, "wishes", editingWishId));
+      resetWishForm();
+      haptic("success");
+    });
+
+    function startWishesListener() {
+      onSnapshot(collection(db, "wishes"), (snapshot) => {
+        allWishes = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderWishes();
+      });
+    }
+
     // ---- Аналитика ----
     // Прогноз считается перебором дней, а не умножением на среднее: в месяце бывает
     // четыре вторника, а бывает пять, и платёж может закончиться в середине месяца.
@@ -5037,6 +5354,7 @@
           updateHomeStats();
         });
         startBudgetListeners();
+        startWishesListener();
         startPlansListeners();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;

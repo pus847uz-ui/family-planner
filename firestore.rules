@@ -50,6 +50,11 @@ service cloud.firestore {
       allow read, write: if isFamilyMember();
     }
 
+    // Желания общие: смысл списка в том, чтобы второй знал, чего хочется первому.
+    match /wishes/{wishId} {
+      allow read, write: if isFamilyMember();
+    }
+
     // Курсы ЦБ на каждый день. Пишет только плановая функция через Admin SDK — курс
     // официальный, и правка его из приложения означала бы подделку истории трат.
     match /exchange_rates/{date} {

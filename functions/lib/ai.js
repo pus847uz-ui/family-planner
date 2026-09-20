@@ -31,10 +31,14 @@ const SYSTEM_INSTRUCTION = `Ты помощник семейного плани�
 
 КАК УСТРОЕН ПЛАНИРОВЩИК
 
-Мини-приложение открывается кнопкой в боте по команде /start. В нём семь разделов:
-«Сделать», «Покупки», «Календарь», «Бюджет» (проекты и регулярные платежи), «Поездки»,
-«Досуг», «Приёмы пищи». Там записи заводят и правят вручную, там же ставят сроки,
-исполнителей и закрывают сделанное.
+Мини-приложение открывается кнопкой в боте по команде /start. В нём разделы: «Сделать»,
+«Покупки», «Календарь», «Бюджет» (проекты и регулярные платежи), «Поездки», «Досуг»,
+«Приёмы пищи», «Помощник», «Аналитика» (нагрузка по платежам и прогноз на год) и
+«Желания». Там записи заводят и правят вручную, там же ставят сроки, исполнителей и
+закрывают сделанное.
+
+В «Желаниях» отмечают, чего хочется: своё или общее, с необязательным сроком. Когда
+желание сбывается, на карточке видно, сколько времени прошло от загадывания.
 
 В семейной группе есть темы. Тема привязывается к разделу командой /bind с названием
 раздела: сделать, покупки, календарь, еда. После этого любое сообщение в теме само
@@ -80,14 +84,16 @@ async function buildContext(uid) {
   const db = getFirestore();
   const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
 
-  const [users, tasksSnap, shoppingSnap, eventsSnap, plansSnap, paymentsSnap] = await Promise.all([
-    listFamilyUsers(),
-    db.collection("tasks").where("status", "==", "open").get(),
-    db.collection("shopping_items").where("status", "==", "active").get(),
-    db.collection("events").where("startDate", ">=", today).orderBy("startDate").limit(LIMIT).get(),
-    db.collection("plans").get(),
-    db.collection("recurring_payments").where("status", "==", "active").get(),
-  ]);
+  const [users, tasksSnap, shoppingSnap, eventsSnap, plansSnap, paymentsSnap, wishesSnap] =
+    await Promise.all([
+      listFamilyUsers(),
+      db.collection("tasks").where("status", "==", "open").get(),
+      db.collection("shopping_items").where("status", "==", "active").get(),
+      db.collection("events").where("startDate", ">=", today).orderBy("startDate").limit(LIMIT).get(),
+      db.collection("plans").get(),
+      db.collection("recurring_payments").where("status", "==", "active").get(),
+      db.collection("wishes").where("status", "==", "open").get(),
+    ]);
 
   const usersById = new Map(users.map((u) => [String(u.id), u.name]));
 
@@ -118,6 +124,14 @@ async function buildContext(uid) {
       .map((p) => ({ title: p.title, type: PLAN_TYPE_TITLE[p.type] || p.type })),
     // Личный платёж видит только тот, кто его завёл. Отсутствие пометки означает общий:
     // всё, что было заведено до появления этой кнопки, остаётся видно обоим.
+    wishes: wishesSnap.docs.slice(0, LIMIT).map((d) => {
+      const w = d.data();
+      return {
+        text: w.text,
+        owner: nameOf(usersById, w.ownerUid),
+        targetDate: w.targetDate,
+      };
+    }),
     payments: paymentsSnap.docs
       .map((d) => d.data())
       .filter((p) => p.visibility !== "private" || String(p.authorUid) === String(uid))
@@ -171,6 +185,15 @@ function formatContext(ctx) {
   if (ctx.plans.length > 0) {
     lines.push("", "Планы в работе:");
     ctx.plans.forEach((p) => lines.push(`- ${p.title} (${p.type})`));
+  }
+
+  if (ctx.wishes.length > 0) {
+    lines.push("", "Загаданные желания:");
+    ctx.wishes.forEach((w) => {
+      const parts = [w.owner || "общее"];
+      if (w.targetDate) parts.push(`хочется к ${w.targetDate}`);
+      lines.push(`- ${w.text} (${parts.join(", ")})`);
+    });
   }
 
   if (ctx.payments.length > 0) {
