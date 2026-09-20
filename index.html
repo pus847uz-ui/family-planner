@@ -441,6 +441,25 @@
        про них просто забудут. */
     .meta-row { display: flex; gap: 8px; align-items: stretch; }
     .meta-row select { flex: 1; min-width: 0; }
+
+    /* Валюта кнопками, а не выпадающим списком: их всего четыре, выбор становится одним
+       нажатием вместо двух, и это обходит капризы нативного select внутри Telegram. */
+    .currency-row { display: flex; gap: 6px; }
+    .currency-chip {
+      flex: 1;
+      padding: 10px 4px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      background: var(--tg-theme-bg-color, #ffffff);
+      color: var(--tg-theme-text-color, #111111);
+      box-shadow: inset 0 0 0 1px var(--tg-theme-hint-color, #cccccc);
+    }
+    .currency-chip.active {
+      background: var(--tg-theme-button-color, #2481cc);
+      color: var(--tg-theme-button-text-color, #ffffff);
+      box-shadow: none;
+    }
     .share-chip {
       flex-shrink: 0;
       border: none;
@@ -747,8 +766,8 @@
           <input id="project-title" type="text" placeholder="Название проекта (например, «Ремонт кухни»)">
           <div class="event-form-row">
             <input id="project-limit" type="number" step="0.01" min="0" placeholder="Лимит (необязательно)">
-            <select id="project-currency"></select>
           </div>
+          <div class="currency-row" id="project-currency"></div>
         </div>
 
         <div class="period-toggle" id="budget-archive-filter">
@@ -769,8 +788,8 @@
           <input id="project-edit-title" type="text" placeholder="Название проекта">
           <div class="event-form-row">
             <input id="project-edit-limit" type="number" step="0.01" min="0" placeholder="Лимит">
-            <select id="project-edit-currency"></select>
           </div>
+          <div class="currency-row" id="project-edit-currency"></div>
           <div class="form-actions">
             <button type="button" id="project-edit-save-btn" class="text-btn">Сохранить</button>
             <button type="button" id="project-edit-cancel-btn" class="text-btn">Отмена</button>
@@ -780,10 +799,8 @@
         <div id="project-detail-summary"></div>
 
         <div class="event-form">
-          <div class="event-form-row">
-            <input id="entry-amount" type="number" step="0.01" min="0" placeholder="Сумма">
-            <select id="entry-currency"></select>
-          </div>
+          <input id="entry-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+          <div class="currency-row" id="entry-currency"></div>
           <input id="entry-comment" type="text" placeholder="Комментарий (необязательно)">
           <div class="meta-row">
             <select id="entry-payer"></select>
@@ -810,10 +827,8 @@
       <div id="budget-recurring-view" style="display: none;">
         <div class="event-form">
           <input id="recurring-title" type="text" placeholder="Название платежа (например, «Ипотека»)">
-          <div class="event-form-row">
-            <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
-            <select id="recurring-currency"></select>
-          </div>
+          <input id="recurring-amount" type="number" step="0.01" min="0" placeholder="Сумма">
+          <div class="currency-row" id="recurring-currency"></div>
           <div class="period-toggle" id="recurring-period">
             <button type="button" class="period-btn active" data-period="monthly">Месяц</button>
             <button type="button" class="period-btn" data-period="weekly">Неделя</button>
@@ -879,8 +894,8 @@
           </div>
           <div class="event-form-row">
             <input id="trip-budget" type="number" step="0.01" min="0" placeholder="Бюджет (необязательно)">
-            <select id="trip-currency"></select>
           </div>
+          <div class="currency-row" id="trip-currency"></div>
         </div>
         <div class="period-toggle" id="trip-archive-filter">
           <button type="button" class="period-btn active" data-archive="active">Активные</button>
@@ -904,8 +919,8 @@
           </div>
           <div class="event-form-row">
             <input id="trip-edit-budget" type="number" step="0.01" min="0" placeholder="Бюджет">
-            <select id="trip-edit-currency"></select>
           </div>
+          <div class="currency-row" id="trip-edit-currency"></div>
           <div class="form-actions">
             <button type="button" id="trip-edit-save-btn" class="text-btn">Сохранить</button>
             <button type="button" id="trip-edit-cancel-btn" class="text-btn">Отмена</button>
@@ -1142,12 +1157,12 @@
     const budgetRecurringViewEl = document.getElementById("budget-recurring-view");
     const projectTitleInput = document.getElementById("project-title");
     const projectLimitInput = document.getElementById("project-limit");
-    const projectCurrencySelect = document.getElementById("project-currency");
+    const projectCurrencyRow = document.getElementById("project-currency");
     const projectsListEl = document.getElementById("projects-list");
     const projectDetailTitleEl = document.getElementById("project-detail-title");
     const projectDetailSummaryEl = document.getElementById("project-detail-summary");
     const entryAmountInput = document.getElementById("entry-amount");
-    const entryCurrencySelect = document.getElementById("entry-currency");
+    const entryCurrencyRow = document.getElementById("entry-currency");
     const entryPayerSelect = document.getElementById("entry-payer");
     const entrySharedBtn = document.getElementById("entry-shared-btn");
     const recurringPayerSelect = document.getElementById("recurring-payer");
@@ -1162,14 +1177,14 @@
     const projectEditForm = document.getElementById("project-edit-form");
     const projectEditTitleInput = document.getElementById("project-edit-title");
     const projectEditLimitInput = document.getElementById("project-edit-limit");
-    const projectEditCurrencySelect = document.getElementById("project-edit-currency");
+    const projectEditCurrencyRow = document.getElementById("project-edit-currency");
     const projectEditSaveBtn = document.getElementById("project-edit-save-btn");
     const projectEditCancelBtn = document.getElementById("project-edit-cancel-btn");
     const entriesListEl = document.getElementById("entries-list");
     const entriesHintEl = document.getElementById("entries-hint");
     const recurringTitleInput = document.getElementById("recurring-title");
     const recurringAmountInput = document.getElementById("recurring-amount");
-    const recurringCurrencySelect = document.getElementById("recurring-currency");
+    const recurringCurrencyRow = document.getElementById("recurring-currency");
     const recurringDayInput = document.getElementById("recurring-day");
     const recurringFormActions = document.getElementById("recurring-form-actions");
     const recurringDeleteBtn = document.getElementById("recurring-delete-btn");
@@ -1200,7 +1215,7 @@
     const tripStartDateInput = document.getElementById("trip-start-date");
     const tripEndDateInput = document.getElementById("trip-end-date");
     const tripBudgetInput = document.getElementById("trip-budget");
-    const tripCurrencySelect = document.getElementById("trip-currency");
+    const tripCurrencyRow = document.getElementById("trip-currency");
     const tripsListEl = document.getElementById("trips-list");
     const tripDetailTitleEl = document.getElementById("trip-detail-title");
     const tripEditBtn = document.getElementById("trip-edit-btn");
@@ -1210,7 +1225,7 @@
     const tripEditStartDateInput = document.getElementById("trip-edit-start-date");
     const tripEditEndDateInput = document.getElementById("trip-edit-end-date");
     const tripEditBudgetInput = document.getElementById("trip-edit-budget");
-    const tripEditCurrencySelect = document.getElementById("trip-edit-currency");
+    const tripEditCurrencyRow = document.getElementById("trip-edit-currency");
     const tripEditSaveBtn = document.getElementById("trip-edit-save-btn");
     const tripEditCancelBtn = document.getElementById("trip-edit-cancel-btn");
     const tripDetailMetaEl = document.getElementById("trip-detail-meta");
@@ -2569,17 +2584,44 @@
     let activeProjectId = null;
     let currentBudgetSub = "projects";
 
-    function populateCurrencySelect(selectEl) {
+    // Ряд кнопок вместо списка. Значение держим в data-атрибуте контейнера, чтобы
+    // читать его так же коротко, как раньше читали value у select.
+    function buildCurrencyRow(rowEl, onChange) {
+      rowEl.innerHTML = "";
       Object.entries(CURRENCIES).forEach(([code, symbol]) => {
-        const opt = document.createElement("option");
-        opt.value = code;
-        opt.textContent = `${code} (${symbol})`;
-        selectEl.appendChild(opt);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "currency-chip";
+        btn.dataset.currency = code;
+        btn.textContent = symbol;
+        btn.addEventListener("click", () => {
+          setCurrency(rowEl, code);
+          haptic();
+          if (onChange) onChange();
+        });
+        rowEl.appendChild(btn);
+      });
+      setCurrency(rowEl, BASE_CURRENCY);
+    }
+
+    function setCurrency(rowEl, code) {
+      const known = CURRENCIES[code] ? code : BASE_CURRENCY;
+      rowEl.dataset.value = known;
+      rowEl.querySelectorAll(".currency-chip").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.currency === known);
       });
     }
-    populateCurrencySelect(projectCurrencySelect);
-    populateCurrencySelect(recurringCurrencySelect);
-    populateCurrencySelect(entryCurrencySelect);
+
+    function getCurrency(rowEl) {
+      return rowEl.dataset.value || BASE_CURRENCY;
+    }
+
+    buildCurrencyRow(projectCurrencyRow);
+    buildCurrencyRow(projectEditCurrencyRow);
+    buildCurrencyRow(tripCurrencyRow);
+    buildCurrencyRow(tripEditCurrencyRow);
+    buildCurrencyRow(recurringCurrencyRow);
+    buildCurrencyRow(entryCurrencyRow, updateEntryRateHint);
 
     function formatAmount(n, currency) {
       return `${Number(n).toLocaleString("ru-RU")} ${CURRENCIES[currency] || currency || ""}`.trim();
@@ -2782,7 +2824,7 @@
       // Валюта записи по умолчанию — валюта проекта: чаще всего тратят именно в ней,
       // а поменять на другую можно тут же, рядом с суммой.
       const project = allProjects.find((p) => p.id === projectId);
-      entryCurrencySelect.value = (project && project.currency) || BASE_CURRENCY;
+      setCurrency(entryCurrencyRow, (project && project.currency) || BASE_CURRENCY);
       entryPayerSelect.value = "";
       setShareChip(entrySharedBtn, false);
       updateEntryRateHint();
@@ -2926,7 +2968,7 @@
       await addDoc(collection(db, "budget_projects"), {
         title,
         limit,
-        currency: projectCurrencySelect.value,
+        currency: getCurrency(projectCurrencyRow),
         status: "active",
         authorUid: auth.currentUser.uid,
         createdAt: serverTimestamp(),
@@ -2937,14 +2979,13 @@
       haptic("success");
     }
 
-    populateCurrencySelect(projectEditCurrencySelect);
 
     projectEditBtn.addEventListener("click", () => {
       const project = allProjects.find((p) => p.id === activeProjectId);
       if (!project) return;
       projectEditTitleInput.value = project.title;
       projectEditLimitInput.value = project.limit;
-      projectEditCurrencySelect.value = project.currency || "USD";
+      setCurrency(projectEditCurrencyRow, project.currency);
       projectEditForm.style.display = "flex";
     });
 
@@ -2962,7 +3003,7 @@
       await updateDoc(doc(db, "budget_projects", activeProjectId), {
         title,
         limit,
-        currency: projectEditCurrencySelect.value,
+        currency: getCurrency(projectEditCurrencyRow),
       });
       projectEditForm.style.display = "none";
       haptic("success");
@@ -2991,7 +3032,7 @@
         return;
       }
 
-      const currency = entryCurrencySelect.value;
+      const currency = getCurrency(entryCurrencyRow);
       const rate = currency === BASE_CURRENCY ? 1 : (exchangeRates && exchangeRates[currency]) || null;
 
       await addDoc(collection(db, "budget_entries"), {
@@ -3023,7 +3064,7 @@
     // замечает, если валюта осталась от прошлой записи.
     function updateEntryRateHint() {
       const amount = Number(entryAmountInput.value);
-      const currency = entryCurrencySelect.value;
+      const currency = getCurrency(entryCurrencyRow);
 
       if (!amount || amount <= 0 || currency === BASE_CURRENCY) {
         entryRateHintEl.textContent = "";
@@ -3043,7 +3084,6 @@
     }
 
     entryAmountInput.addEventListener("input", updateEntryRateHint);
-    entryCurrencySelect.addEventListener("change", updateEntryRateHint);
 
     [entrySharedBtn, recurringSharedBtn].forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -3292,7 +3332,7 @@
       editingRecurringId = payment.id;
       recurringTitleInput.value = payment.title;
       recurringAmountInput.value = payment.amount;
-      recurringCurrencySelect.value = payment.currency || BASE_CURRENCY;
+      setCurrency(recurringCurrencyRow, payment.currency);
 
       const period = periodOf(payment);
       showRecurringPeriod(period);
@@ -3391,7 +3431,7 @@
       const data = {
         title,
         amount,
-        currency: recurringCurrencySelect.value,
+        currency: getCurrency(recurringCurrencyRow),
         ...schedule,
         endsOn: recurringEndsInput.value || null,
         payerUid: recurringPayerSelect.value || null,
@@ -3568,8 +3608,6 @@
     }
     const TRIP_STATUS_LABELS = { planned: "В планах", confirmed: "Подтверждена", completed: "Завершена" };
 
-    populateCurrencySelect(tripCurrencySelect);
-    populateCurrencySelect(tripEditCurrencySelect);
 
     document.querySelectorAll("#trip-archive-filter .period-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -3792,7 +3830,7 @@
       tripEditStartDateInput.value = trip.startDate;
       tripEditEndDateInput.value = trip.endDate;
       tripEditBudgetInput.value = trip.budgetAmount || "";
-      tripEditCurrencySelect.value = trip.budgetCurrency || "USD";
+      setCurrency(tripEditCurrencyRow, trip.budgetCurrency);
       tripEditForm.style.display = "flex";
     });
 
@@ -3808,7 +3846,7 @@
         return;
       }
       const budgetAmount = Number(tripEditBudgetInput.value) || null;
-      const budgetCurrency = budgetAmount ? tripEditCurrencySelect.value : null;
+      const budgetCurrency = budgetAmount ? getCurrency(tripEditCurrencyRow) : null;
 
       const trip = allTrips.find((t) => t.id === activeTripId);
       let budgetProjectId = trip ? trip.budgetProjectId || null : null;
@@ -3882,7 +3920,7 @@
       }
 
       const budgetAmount = Number(tripBudgetInput.value) || null;
-      const budgetCurrency = budgetAmount ? tripCurrencySelect.value : null;
+      const budgetCurrency = budgetAmount ? getCurrency(tripCurrencyRow) : null;
 
       let budgetProjectId = null;
       if (budgetAmount) {
