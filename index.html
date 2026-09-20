@@ -758,6 +758,7 @@
 
         <div id="recurring-total" class="recurring-total" style="display: none;">
           <div class="recurring-total-main" id="recurring-total-main"></div>
+          <div class="recurring-total-parts" id="recurring-total-payers"></div>
           <div class="recurring-total-parts" id="recurring-total-parts"></div>
         </div>
 
@@ -1074,6 +1075,7 @@
     const recurringListEl = document.getElementById("recurring-list");
     const recurringTotalEl = document.getElementById("recurring-total");
     const recurringTotalMainEl = document.getElementById("recurring-total-main");
+    const recurringTotalPayersEl = document.getElementById("recurring-total-payers");
     const recurringTotalPartsEl = document.getElementById("recurring-total-parts");
 
     const homeStatTripsEl = document.getElementById("home-stat-trips");
@@ -1509,6 +1511,10 @@
         populateAssigneeSelect(mealMenuAssigneeSelect);
         populatePayerSelect(entryPayerSelect);
         populatePayerSelect(recurringPayerSelect);
+        // Разбивка по плательщикам подписана именами, а они приходят этим же слушателем —
+        // без перерисовки на их месте до перехода по разделам стояли бы telegram id.
+        renderRecurring();
+        if (activeProjectId) renderProjectDetail();
         // фильтры строятся из списка участников, а списки показывают их имена
         renderPersonFilter();
         renderTasksList();
@@ -2494,6 +2500,31 @@
       return toBaseAmount(project.limit, project.currency || BASE_CURRENCY);
     }
 
+    // Разбивка сумм по тому, кто платит. Ключ пустой строкой — «вместе»: так записи без
+    // плательщика не теряются и видно, какая часть расходов осталась общей.
+    function sumByPayer(items, amountOf) {
+      const byPayer = new Map();
+      items.forEach((item) => {
+        const amount = amountOf(item);
+        if (amount === null) return;
+        const key = item.payerUid || "";
+        byPayer.set(key, (byPayer.get(key) || 0) + amount);
+      });
+      return byPayer;
+    }
+
+    // Строка вида «Пушкин 500 000 сум · вместе 200 000 сум». Пустая, когда плательщик
+    // всего один: тогда разбивка просто повторяет общий итог другими словами.
+    function formatPayerBreakdown(byPayer) {
+      const parts = [];
+      byPayer.forEach((sum, uid) => {
+        if (Math.round(sum) === 0) return;
+        const name = uid ? assigneeName(uid) : "вместе";
+        parts.push(`${name} ${formatAmount(Math.round(sum), BASE_CURRENCY)}`);
+      });
+      return parts.length > 1 ? parts.join(" · ") : "";
+    }
+
     function renderProjects() {
       const filtered = allProjects
         .filter((p) => p.status === currentArchiveFilter)
@@ -2606,7 +2637,25 @@
         lines.push(`Без курса и вне итога: ${unconverted}`);
       }
 
-      projectDetailSummaryEl.textContent = lines.join(" · ");
+      projectDetailSummaryEl.innerHTML = "";
+      const summaryMain = document.createElement("div");
+      summaryMain.textContent = lines.join(" · ");
+      projectDetailSummaryEl.appendChild(summaryMain);
+
+      const breakdown = formatPayerBreakdown(
+        sumByPayer(entries, (entry) => {
+          const base = entryBaseAmount(entry, project);
+          if (base === null) return null;
+          return entry.type === "income" ? -base : base;
+        })
+      );
+      if (breakdown) {
+        const byPayerEl = document.createElement("div");
+        byPayerEl.className = "field-label";
+        byPayerEl.style.marginTop = "4px";
+        byPayerEl.textContent = breakdown;
+        projectDetailSummaryEl.appendChild(byPayerEl);
+      }
 
       entriesListEl.innerHTML = "";
       if (entries.length === 0) {
@@ -2863,6 +2912,10 @@
 
       recurringTotalEl.style.display = "block";
       recurringTotalMainEl.textContent = `В месяц ${formatAmount(Math.round(total), BASE_CURRENCY)}`;
+
+      recurringTotalPayersEl.textContent = formatPayerBreakdown(
+        sumByPayer(allRecurring, (payment) => toBaseAmount(payment.amount, payment.currency || BASE_CURRENCY))
+      );
 
       const parts = Object.entries(byCurrency)
         .filter(([currency]) => currency !== BASE_CURRENCY)
