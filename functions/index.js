@@ -7,7 +7,7 @@ const {
   onDocumentDeleted,
 } = require("firebase-functions/v2/firestore");
 const { onMessagePublished } = require("firebase-functions/v2/pubsub");
-const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, Timestamp } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
 
 const {
@@ -26,7 +26,17 @@ const {
 } = require("./lib/dates");
 const { isPaymentDueOn, isPaidFor, periodOf, monthlyCost } = require("./lib/payments");
 const { sendTelegramMessage, callTelegramApi, buildTopicLink, answerCallback } = require("./lib/telegram");
-const { getUserName } = require("./lib/users");
+const { getUserName, isFamilyMember } = require("./lib/users");
+
+// Вход в Firebase сейчас возможен только через verifyInitData, но callable видит лишь
+// «кто-то вошёл». Включи кто-нибудь в консоли анонимный вход — и без этой проверки
+// askAi пересказал бы постороннему все дела семьи.
+async function requireFamilyMember(request) {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+  if (!(await isFamilyMember(uid))) throw new HttpsError("permission-denied", "Нет доступа");
+  return uid;
+}
 const {
   sortByDueDate,
   morningSummaryText,
@@ -103,7 +113,7 @@ exports.verifyInitData = onRequest(
       res.status(200).json({ token: customToken });
     } catch (err) {
       console.error("verifyInitData failed:", err);
-      res.status(500).json({ error: "Internal error", detail: err.message });
+      res.status(500).json({ error: "Internal error" });
     }
   }
 );
@@ -358,8 +368,14 @@ exports.sendEventReminders = onSchedule(
     const db = getFirestore();
     const now = Date.now();
 
+    // Оба окна напоминаний лежат внутри ближайших суток — дальше читать незачем. Раньше
+    // сюда 48 раз в день уезжала вся коллекция, включая прошлогодние события.
     const [eventsSnap, usersSnap] = await Promise.all([
-      db.collection("events").get(),
+      db
+        .collection("events")
+        .where("startAt", ">", Timestamp.fromMillis(now))
+        .where("startAt", "<=", Timestamp.fromMillis(now + ONE_DAY_MS))
+        .get(),
       db.collection("users").get(),
     ]);
     const chatIds = usersSnap.docs.map((d) => d.id);
@@ -505,7 +521,7 @@ exports.fetchExchangeRates = onSchedule(
 // недоступен, отдаём последний известный вместе с его датой, чтобы приложение показало,
 // на какое число посчитано.
 exports.getExchangeRates = onCall(async (request) => {
-  if (!request.auth) throw new HttpsError("unauthenticated", "Нужна авторизация");
+  await requireFamilyMember(request);
 
   const today = isoDateInTimeZone(REMINDER_TIMEZONE, 0);
 
@@ -614,6 +630,15 @@ exports.telegramWebhook = onRequest(
     const message = req.body && req.body.message;
     const callbackQuery = req.body && req.body.callback_query;
 
+    // Бот слушает только личку и нашу семейную группу. Добавить его в свою группу может
+    // кто угодно, а privacy mode у него выключен — чужие группы молча пропускаем целиком,
+    // чтобы ни привязка тем, ни захват, ни кнопки там не работали.
+    const chat = (message && message.chat) || (callbackQuery && callbackQuery.message && callbackQuery.message.chat);
+    if (chat && chat.type !== "private" && chat.id !== TOPICS_CHAT_ID) {
+      res.status(200).send("OK");
+      return;
+    }
+
     try {
       if (callbackQuery) {
         const action = (callbackQuery.data || "").split(":")[0];
@@ -703,8 +728,7 @@ exports.onBudgetAlert = onMessagePublished(
 const MAX_QUESTION_LENGTH = 1000;
 
 exports.askAi = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
-  const uid = request.auth && request.auth.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+  const uid = await requireFamilyMember(request);
 
   const question = String((request.data && request.data.question) || "").trim();
   if (!question) throw new HttpsError("invalid-argument", "Вопрос пустой");
@@ -729,16 +753,14 @@ exports.askAi = onCall({ secrets: [GEMINI_API_KEY] }, async (request) => {
 });
 
 exports.getAiHistory = onCall(async (request) => {
-  const uid = request.auth && request.auth.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+  const uid = await requireFamilyMember(request);
 
   const limit = Math.min(Math.max(Number(request.data && request.data.limit) || 10, 1), 50);
   return { history: await getConversationHistory(uid, limit) };
 });
 
 exports.clearAiHistory = onCall(async (request) => {
-  const uid = request.auth && request.auth.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Нужна авторизация");
+  const uid = await requireFamilyMember(request);
 
   return { deleted: await clearConversationHistory(uid) };
 });

@@ -22,7 +22,9 @@ function checkTelegramInitData(initData, botToken) {
     .update(dataCheckString)
     .digest("hex");
 
-  if (computedHash !== hash) {
+  const expected = Buffer.from(computedHash, "hex");
+  const received = Buffer.from(hash, "hex");
+  if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
     return null;
   }
 
@@ -36,7 +38,11 @@ function checkTelegramInitData(initData, botToken) {
   if (!userJson) {
     return null;
   }
-  return JSON.parse(userJson);
+  try {
+    return JSON.parse(userJson);
+  } catch {
+    return null;
+  }
 }
 
 module.exports = { checkTelegramInitData };

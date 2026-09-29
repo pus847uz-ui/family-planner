@@ -37,7 +37,9 @@ function eventNotificationMessage(eventItem, actorName, isNew) {
 function eventKeyboard(eventItem) {
   // Ссылка на карту — обычной url-кнопкой; никаких действий над событием «нажатием» нет,
   // завершать или переносить его как задачу бессмысленно.
-  if (!eventItem.locationUrl) return undefined;
+  // Не-ссылку Telegram не примет в url-кнопке и отклонит всё сообщение — участники
+  // не получили бы даже текста. Лучше уведомление без кнопки, чем никакого.
+  if (!/^https?:\/\//i.test(eventItem.locationUrl || "")) return undefined;
   return { inline_keyboard: [[{ text: "📍 Место на карте", url: eventItem.locationUrl }]] };
 }
 

@@ -6,7 +6,10 @@
 // от второго участника семьи.
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { listFamilyUsers } = require("./users");
-const { isoDateInTimeZone } = require("./dates");
+const { isoDateInTimeZone, addDaysToDateStr } = require("./dates");
+const { periodOf, nextPaymentDate, isPaidFor } = require("./payments");
+
+const PERIOD_TITLE = { monthly: "ежемесячно", weekly: "еженедельно", yearly: "раз в год" };
 const { REMINDER_TIMEZONE } = require("./config");
 const { PLAN_TYPE_TITLE, isClosedStatus } = require("./plans");
 
@@ -136,13 +139,20 @@ async function buildContext(uid) {
       .map((d) => d.data())
       .filter((p) => p.visibility !== "private" || String(p.authorUid) === String(uid))
       .slice(0, LIMIT)
-      .map((p) => ({
-        title: p.title,
-        amount: p.amount,
-        currency: p.currency,
-        dueDay: p.dueDay,
-        payer: nameOf(usersById, p.payerUid),
-      })),
+      .map((p) => {
+        // День месяца есть только у ежемесячных; у еженедельных и годовых модель видела
+        // «undefined числа». Дата следующего платежа понятна для любой периодичности.
+        const next = nextPaymentDate(p, today, addDaysToDateStr);
+        return {
+          title: p.title,
+          amount: p.amount,
+          currency: p.currency,
+          period: PERIOD_TITLE[periodOf(p)],
+          next,
+          paid: isPaidFor(p, next),
+          payer: nameOf(usersById, p.payerUid),
+        };
+      }),
   };
 }
 
@@ -199,8 +209,11 @@ function formatContext(ctx) {
   if (ctx.payments.length > 0) {
     lines.push("", "Регулярные платежи:");
     ctx.payments.forEach((p) => {
-      const payer = p.payer ? `, платит ${p.payer}` : "";
-      lines.push(`- ${p.title}: ${p.amount} ${p.currency || ""}, ${p.dueDay} числа${payer}`);
+      const parts = [p.period];
+      if (p.next) parts.push(`следующий ${p.next}${p.paid ? ", уже оплачен" : ""}`);
+      else parts.push("срок закончился");
+      if (p.payer) parts.push(`платит ${p.payer}`);
+      lines.push(`- ${p.title}: ${p.amount} ${p.currency || ""} (${parts.join(", ")})`);
     });
   }
 
