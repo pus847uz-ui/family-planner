@@ -5,8 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Family Planner</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -21,6 +23,19 @@
       padding: 16px;
       font-size: 15px;
       color: var(--tg-theme-hint-color, #888888);
+    }
+    #error-banner {
+      position: fixed;
+      top: 8px;
+      left: 12px;
+      right: 12px;
+      z-index: 2000;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: #d64545;
+      color: #ffffff;
+      font-size: 14px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
     }
     .page { display: none; }
     .page.active { display: block; }
@@ -300,6 +315,7 @@
       font-size: 15px;
       color: #ffffff;
     }
+    .entry-btn:disabled { opacity: 0.5; }
     .entry-btn.income { background: #2e7d32; }
     .entry-btn.expense { background: var(--tg-theme-destructive-text-color, #e53935); }
     .entry-amount.income { color: #2e7d32; }
@@ -321,13 +337,13 @@
       color: var(--tg-theme-hint-color, #999999);
       overflow-wrap: break-word;
     }
-    #plan-view-header {
+    .plan-view-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
     }
-    #plan-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: break-word; }
+    .plan-view-header h2 { margin: 0; font-size: 18px; min-width: 0; overflow-wrap: break-word; }
     .plan-meta {
       font-size: 14px;
       color: var(--tg-theme-hint-color, #999999);
@@ -718,6 +734,7 @@
 </head>
 <body>
   <div id="status">Проверяем доступ...</div>
+  <div id="error-banner" role="alert" style="display: none;"></div>
 
   <div id="app" style="display: none;">
     <section id="page-home" class="page active">
@@ -906,6 +923,7 @@
     </section>
 
     <section id="page-calendar" class="page">
+      <div class="page-title">Календарь</div>
       <div class="event-form">
         <input id="event-title" type="text" placeholder="Название события">
         <div class="event-form-row">
@@ -946,6 +964,7 @@
     </section>
 
     <section id="page-budget" class="page">
+      <div class="page-title">Бюджет</div>
       <div class="period-toggle" id="budget-subnav">
         <button type="button" class="period-btn active" data-budget-sub="projects">Проекты</button>
         <button type="button" class="period-btn" data-budget-sub="recurring">Платежи</button>
@@ -1081,6 +1100,7 @@
 
     <section id="page-trips" class="page">
       <div id="trips-list-view">
+        <div class="page-title">Поездки</div>
         <div class="event-form">
           <input id="trip-title" type="text" placeholder="Название поездки">
           <input id="trip-destination" type="text" placeholder="Направление">
@@ -1102,7 +1122,7 @@
       </div>
 
       <div id="trip-detail-view" style="display: none;">
-        <div id="plan-view-header">
+        <div class="plan-view-header">
           <h2 id="trip-detail-title"></h2>
           <button type="button" id="trip-edit-btn" class="text-btn">✏️ Изменить</button>
         </div>
@@ -1153,6 +1173,7 @@
 
     <section id="page-leisure" class="page">
       <div id="leisure-list-view">
+        <div class="page-title">Досуг</div>
         <div class="event-form">
           <input id="leisure-title" type="text" placeholder="Название активности">
           <input id="leisure-description" type="text" placeholder="Описание (необязательно)">
@@ -1166,7 +1187,7 @@
       </div>
 
       <div id="leisure-detail-view" style="display: none;">
-        <div id="plan-view-header">
+        <div class="plan-view-header">
           <h2 id="leisure-detail-title"></h2>
           <button type="button" id="leisure-edit-btn" class="text-btn">✏️ Изменить</button>
         </div>
@@ -1191,6 +1212,7 @@
 
     <section id="page-meals" class="page">
       <div id="meals-list-view">
+        <div class="page-title">Приёмы пищи</div>
         <div class="event-form">
           <input id="meal-title" type="text" placeholder="Название (необязательно)">
           <div class="event-form-row">
@@ -1212,7 +1234,7 @@
       </div>
 
       <div id="meal-detail-view" style="display: none;">
-        <div id="plan-view-header">
+        <div class="plan-view-header">
           <h2 id="meal-detail-title"></h2>
           <button type="button" id="meal-edit-btn" class="text-btn">✏️ Изменить</button>
         </div>
@@ -1275,8 +1297,49 @@
     import { getFunctions, httpsCallable } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-functions.js";
     import {
       getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, writeBatch, deleteField,
-      query, where, orderBy, onSnapshot, serverTimestamp,
+      query, where, orderBy, onSnapshot as firestoreOnSnapshot, serverTimestamp,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+    // ---- Ошибки на виду ----
+    // Строка статуса после входа скрыта, поэтому ошибки, которые писались в неё, никто не
+    // видел: отказ правил или обрыв связи выглядели как пустой экран, а неудачное
+    // сохранение — как нажатие, которое ничего не сделало.
+    const errorBannerEl = document.getElementById("error-banner");
+    let errorBannerTimer = null;
+
+    function showError(message) {
+      errorBannerEl.textContent = message;
+      errorBannerEl.style.display = "block";
+      clearTimeout(errorBannerTimer);
+      errorBannerTimer = setTimeout(() => { errorBannerEl.style.display = "none"; }, 8000);
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.notificationOccurred("error");
+      }
+    }
+    errorBannerEl.addEventListener("click", () => { errorBannerEl.style.display = "none"; });
+
+    function describeError(err) {
+      const code = err && err.code ? String(err.code) : "";
+      if (code.includes("permission-denied")) return "нет доступа";
+      if (code.includes("unavailable") || !navigator.onLine) return "нет связи с сервером";
+      return (err && err.message) || "неизвестная ошибка";
+    }
+
+    // Сохранения и удаления разбросаны по сотне обработчиков, и почти ни один не ловит
+    // отказ. Необработанный отказ промиса — это и есть «не сохранилось», поэтому ловим
+    // его здесь, а не оборачиваем каждый вызов по отдельности.
+    window.addEventListener("unhandledrejection", (event) => {
+      console.error(event.reason);
+      showError("Не получилось: " + describeError(event.reason) + ". Попробуйте ещё раз.");
+    });
+
+    // У большинства подписок не было обработчика ошибки вовсе — подставляем общий.
+    function onSnapshot(ref, onNext, onError) {
+      return firestoreOnSnapshot(ref, onNext, onError || ((err) => {
+        console.error(err);
+        showError("Не удалось загрузить данные: " + describeError(err));
+      }));
+    }
 
     const firebaseConfig = {
       projectId: "family-planner-54d84",
@@ -1592,9 +1655,20 @@
       btn.addEventListener("click", () => navigateTo(btn.dataset.target));
     });
 
-    tg.MainButton.onClick(() => {
+    // Пока запись уходит на сервер, повторное нажатие игнорируется: при медленной связи
+    // второе нажатие создавало дубль — так в бюджете появлялись одинаковые расходы.
+    let mainButtonBusy = false;
+    tg.MainButton.onClick(async () => {
       const page = pages[currentPage];
-      if (page && page.add) page.add();
+      if (!page || !page.add || mainButtonBusy) return;
+      mainButtonBusy = true;
+      tg.MainButton.showProgress(false);
+      try {
+        await page.add();
+      } finally {
+        mainButtonBusy = false;
+        tg.MainButton.hideProgress();
+      }
     });
 
     function haptic(type) {
@@ -2051,7 +2125,7 @@
         orderBy("createdAt", "desc")
       );
       onSnapshot(tasksQuery, renderTasks, (err) => {
-        statusEl.textContent = "Ошибка загрузки задач: " + err.message;
+        showError("Не удалось загрузить задачи: " + describeError(err));
       });
     }
 
@@ -2121,7 +2195,7 @@
         cachedClosedToday = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderClosedToday();
       }, (err) => {
-        statusEl.textContent = "Ошибка загрузки закрытых задач: " + err.message;
+        showError("Не удалось загрузить закрытые задачи: " + describeError(err));
       });
     }
 
@@ -2344,7 +2418,7 @@
         orderBy("createdAt", "desc")
       );
       onSnapshot(shoppingQuery, renderShopping, (err) => {
-        statusEl.textContent = "Ошибка загрузки списка покупок: " + err.message;
+        showError("Не удалось загрузить список покупок: " + describeError(err));
       });
     }
 
@@ -2403,7 +2477,7 @@
         cachedBoughtToday = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         renderBoughtToday();
       }, (err) => {
-        statusEl.textContent = "Ошибка загрузки купленного: " + err.message;
+        showError("Не удалось загрузить купленное: " + describeError(err));
       });
     }
 
@@ -2646,7 +2720,7 @@
         renderAgenda();
         updateHomeStats();
       }, (err) => {
-        statusEl.textContent = "Ошибка загрузки календаря: " + err.message;
+        showError("Не удалось загрузить календарь: " + describeError(err));
       });
     }
 
@@ -2722,6 +2796,16 @@
         return;
       }
 
+      // В поле ссылки можно вписать что угодно, а не-ссылка ломала уведомление: Telegram
+      // отклонял его целиком из-за кнопки «Место на карте». Адрес словами — в поле «Место».
+      const locationUrl = eventLocationInput.value.trim();
+      if (locationUrl && !/^https?:\/\/\S+$/i.test(locationUrl)) {
+        haptic("error");
+        notify("В поле ссылки нужна ссылка вида https://… Адрес словами впишите в поле «Место» или выберите точку кнопкой 📍 Карта.");
+        eventLocationInput.focus();
+        return;
+      }
+
       const startTime = eventStartTimeInput.value || null;
       const endDate = eventEndDateInput.value || startDate;
       const endTime = eventEndTimeInput.value || null;
@@ -2733,7 +2817,7 @@
         endDate,
         endTime,
         place: eventPlaceInput.value.trim() || null,
-        locationUrl: eventLocationInput.value.trim() || null,
+        locationUrl: locationUrl || null,
         participantUids: selectedEventParticipants.slice(),
         lastEditedBy: auth.currentUser.uid,
         startAt,
@@ -3401,8 +3485,21 @@
       haptic("success");
     }
 
-    entryIncomeBtn.addEventListener("click", () => addEntry("income"));
-    entryExpenseBtn.addEventListener("click", () => addEntry("expense"));
+    // Тот же запрет повтора, что у главной кнопки: двойной тап по «− Расход» записывал
+    // трату дважды.
+    async function addEntryOnce(type) {
+      if (entryIncomeBtn.disabled) return;
+      entryIncomeBtn.disabled = true;
+      entryExpenseBtn.disabled = true;
+      try {
+        await addEntry(type);
+      } finally {
+        entryIncomeBtn.disabled = false;
+        entryExpenseBtn.disabled = false;
+      }
+    }
+    entryIncomeBtn.addEventListener("click", () => addEntryOnce("income"));
+    entryExpenseBtn.addEventListener("click", () => addEntryOnce("expense"));
 
     projectArchiveBtn.addEventListener("click", async () => {
       const project = allProjects.find((p) => p.id === activeProjectId);
@@ -5322,10 +5419,14 @@
           const body = await response.json().catch(() => ({}));
           if (response.status === 403) {
             statusEl.textContent = "Доступ запрещён: тебя нет в списке семьи.";
+          } else if (response.status === 401) {
+            // Данные входа от Telegram действуют час. Страница, поднятая из фона спустя
+            // долгое время, приходит со старыми — помогает просто открыть заново.
+            statusEl.textContent =
+              "Вход устарел. Закройте планировщик и откройте его снова из бота.";
           } else {
             statusEl.textContent =
-              "Не удалось проверить доступ (ошибка " + response.status + "): " +
-              (body.detail || body.error || "нет подробностей");
+              "Не удалось проверить доступ (ошибка " + response.status + "). Попробуйте открыть заново.";
           }
           return;
         }
@@ -5358,6 +5459,7 @@
         startPlansListeners();
       } catch (err) {
         statusEl.textContent = "Ошибка: " + err.message;
+        showError("Ошибка при запуске: " + describeError(err));
       }
     }
 
